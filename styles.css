@@ -1,0 +1,44 @@
+/* docx-claude plugin styles */
+
+.docx-claude {
+  padding: 1rem 2rem;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.docx-claude p {
+  cursor: text;
+}
+
+.docx-claude-drift-warning {
+  margin: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  font-size: 0.85em;
+}
+
+.docx-claude-modal-selection {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  font-style: italic;
+  white-space: pre-wrap;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.docx-claude-modal-instruction {
+  width: 100%;
+  min-height: 6rem;
+  font-family: var(--font-text);
+}
+
+.docx-claude-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}

@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-docx-claude",
+  "name": "Docx + Claude",
+  "version": "0.0.1",
+  "minAppVersion": "1.5.0",
+  "description": "Preview .docx files inline and route edits through claude-cli-chat. Read-only render with Claude-mediated targeted edits.",
+  "author": "obsidian-docx-claude",
+  "isDesktopOnly": true
+}
