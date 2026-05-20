@@ -54,13 +54,10 @@
    our className="docx-claude" option that becomes .docx-claude-wrapper.
    Its default style is `background: gray`; override to the Obsidian
    theme so the gutter follows the active palette. The page section
-   itself (section.docx-claude) keeps its paper-white background for
-   legibility against both light and dark themes. */
+   itself (section.docx-claude) keeps its white background and the
+   document's own black text — don't override its color, or in dark
+   mode you get light-on-white. */
 .docx-claude-render .docx-claude-wrapper {
   background: var(--background-primary) !important;
   padding: 1rem 0 !important;
-}
-
-section.docx-claude {
-  color: var(--text-normal);
 }
