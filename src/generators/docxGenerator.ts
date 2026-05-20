@@ -16,7 +16,19 @@ function headingLevel(level: 1 | 2 | 3): (typeof HeadingLevel)[keyof typeof Head
   return HeadingLevel.HEADING_3;
 }
 
-function blockToChildren(block: DocxBlock): (Paragraph | Table)[] {
+function textRunsFromCell(cell: string): TextRun[] {
+  // Preserve cell-internal newlines in table cells (TextRun + break:1) so
+  // multi-line cells render correctly in Word.
+  const lines = cell.split("\n");
+  const runs: TextRun[] = [];
+  lines.forEach((line, idx) => {
+    if (idx > 0) runs.push(new TextRun({ text: "", break: 1 }));
+    runs.push(new TextRun(line));
+  });
+  return runs;
+}
+
+function blockToChildren(block: DocxBlock, numberingRef: string): (Paragraph | Table)[] {
   switch (block.type) {
     case "heading":
       return [
@@ -40,7 +52,7 @@ function blockToChildren(block: DocxBlock): (Paragraph | Table)[] {
         (item) =>
           new Paragraph({
             text: item,
-            numbering: { reference: "msoffice-numbered", level: 0 },
+            numbering: { reference: numberingRef, level: 0 },
           }),
       );
     case "table": {
@@ -50,7 +62,7 @@ function blockToChildren(block: DocxBlock): (Paragraph | Table)[] {
             children: row.map(
               (cell) =>
                 new TableCell({
-                  children: [new Paragraph({ children: [new TextRun(cell)] })],
+                  children: [new Paragraph({ children: textRunsFromCell(cell) })],
                 }),
             ),
           }),
@@ -70,26 +82,30 @@ export async function buildDocx(spec: DocxSpec): Promise<ArrayBuffer> {
       }),
     );
   }
-  for (const block of spec.blocks) {
-    for (const child of blockToChildren(block)) children.push(child);
-  }
+  // Each numbered block gets its own numbering definition so list counters
+  // restart at 1. A single shared reference makes the second list continue
+  // from the first.
+  type NumberingConfigItem = NonNullable<
+    ConstructorParameters<typeof Document>[0]["numbering"]
+  >["config"][number];
+  const numberingConfig: NumberingConfigItem[] = [];
+  let numberedIdx = 0;
+  spec.blocks.forEach((block) => {
+    let ref = "";
+    if (block.type === "numbered") {
+      ref = `msoffice-numbered-${numberedIdx++}`;
+      numberingConfig.push({
+        reference: ref,
+        levels: [
+          { level: 0, format: "decimal", text: "%1.", alignment: "start" },
+        ],
+      });
+    }
+    for (const child of blockToChildren(block, ref)) children.push(child);
+  });
 
   const doc = new Document({
-    numbering: {
-      config: [
-        {
-          reference: "msoffice-numbered",
-          levels: [
-            {
-              level: 0,
-              format: "decimal",
-              text: "%1.",
-              alignment: "start",
-            },
-          ],
-        },
-      ],
-    },
+    numbering: { config: numberingConfig },
     sections: [{ children }],
   });
 

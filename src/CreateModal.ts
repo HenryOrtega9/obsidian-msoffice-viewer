@@ -10,6 +10,8 @@ import {
 } from "./generators";
 
 const ILLEGAL_FILENAME_CHARS = /[\\/:*?"<>|]/g;
+const KNOWN_EXTS = /\.(docx|pptx|xlsx|xls|pdf|md|txt|csv)$/i;
+const MAX_STEM_LEN = 200;
 
 interface OpenFn {
   (file: TFile): Promise<void> | void;
@@ -21,6 +23,7 @@ export class CreateModal extends Modal {
   private filenameTouched = false;
   private description = "";
   private busy = false;
+  private aborted = false;
   private statusEl: HTMLElement | null = null;
   private submitBtn: HTMLButtonElement | null = null;
   private filenameInput: HTMLInputElement | null = null;
@@ -93,6 +96,7 @@ export class CreateModal extends Modal {
   }
 
   onClose(): void {
+    this.aborted = true;
     this.contentEl.empty();
   }
 
@@ -102,7 +106,10 @@ export class CreateModal extends Modal {
 
   private setBusy(busy: boolean): void {
     this.busy = busy;
-    if (this.submitBtn) this.submitBtn.disabled = busy;
+    if (this.submitBtn) {
+      this.submitBtn.disabled = busy;
+      this.submitBtn.setText(busy ? "Creating…" : "Create");
+    }
   }
 
   private resolveTargetFolder(): string {
@@ -128,11 +135,14 @@ export class CreateModal extends Modal {
   }
 
   private normalizeFilename(raw: string, kind: FileKind): string {
-    let name = raw.trim().replace(ILLEGAL_FILENAME_CHARS, " ");
+    let name = raw.trim().replace(ILLEGAL_FILENAME_CHARS, " ").trim();
     if (!name) name = "Untitled";
-    const expectedExt = `.${kind}`;
-    if (!name.toLowerCase().endsWith(expectedExt)) name += expectedExt;
-    return name;
+    // Strip any trailing known extension (so picking pptx with "notes.pdf"
+    // produces "notes.pptx", not "notes.pdf.pptx").
+    name = name.replace(KNOWN_EXTS, "");
+    if (!name) name = "Untitled";
+    if (name.length > MAX_STEM_LEN) name = name.slice(0, MAX_STEM_LEN);
+    return `${name}.${kind}`;
   }
 
   private async submit(): Promise<void> {
@@ -148,6 +158,7 @@ export class CreateModal extends Modal {
       const raw = await this.bridge.run(system, this.description.trim(), {
         timeoutMs: 180_000,
       });
+      if (this.aborted) return;
 
       this.setStatus("Parsing response…");
       let parsed: unknown;
@@ -164,16 +175,17 @@ export class CreateModal extends Modal {
 
       this.setStatus("Building file…");
       const buf = await buildFile(spec);
+      if (this.aborted) return;
 
       const folder = this.resolveTargetFolder();
       const filename = this.normalizeFilename(this.filename, this.kind);
-      const path = await this.pickAvailablePath(folder, filename);
+      const file = await this.createWithCollisionRetry(folder, filename, buf);
 
-      const file = await this.app.vault.createBinary(path, buf);
       new Notice(`Created ${file.path}`);
       this.close();
       await this.openFile(file);
     } catch (e) {
+      if (this.aborted) return;
       const msg =
         e instanceof ClaudeBridgeError
           ? e.message
@@ -185,7 +197,28 @@ export class CreateModal extends Modal {
       this.setStatus(`Error: ${msg}`);
       new Notice(msg, 8000);
     } finally {
-      this.setBusy(false);
+      if (!this.aborted) this.setBusy(false);
     }
+  }
+
+  // pickAvailablePath + createBinary aren't atomic; another process (or a
+  // concurrent submit) can win the race between the existence check and the
+  // write. Retry a few times against the next available name when that happens.
+  private async createWithCollisionRetry(
+    folder: string,
+    filename: string,
+    buf: ArrayBuffer,
+  ): Promise<TFile> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const path = await this.pickAvailablePath(folder, filename);
+      try {
+        return await this.app.vault.createBinary(path, buf);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message.toLowerCase() : "";
+        const isCollision = msg.includes("already exists") || msg.includes("eexist");
+        if (!isCollision) throw e;
+      }
+    }
+    throw new Error("Could not write the file after several attempts.");
   }
 }

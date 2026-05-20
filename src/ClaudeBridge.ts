@@ -42,6 +42,23 @@ export class ClaudeBridge {
 
   async run(systemPrompt: string, userPrompt: string, opts?: RunHeadlessOpts): Promise<string> {
     const plugin = this.resolvePlugin();
-    return plugin.runHeadlessPrompt!(systemPrompt, userPrompt, opts);
+    const timeoutMs = opts?.timeoutMs ?? 180_000;
+    // Local timer so we don't hang forever if the embedded plugin ignores
+    // timeoutMs or never resolves (e.g., subprocess deadlock).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new ClaudeBridgeError(`Claude call timed out after ${timeoutMs}ms.`)),
+        timeoutMs,
+      );
+    });
+    try {
+      return await Promise.race([
+        plugin.runHeadlessPrompt!(systemPrompt, userPrompt, opts),
+        timeout,
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 }

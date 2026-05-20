@@ -34,16 +34,23 @@ export class DocxPreviewSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Default zoom")
       .setDesc(`Starting zoom level for newly opened Office files. ${Math.round(MIN_ZOOM * 100)}%–${Math.round(MAX_ZOOM * 100)}%.`)
-      .addText((text) =>
+      .addText((text) => {
         text
           .setPlaceholder("100")
           .setValue(String(Math.round(this.plugin.settings.defaultZoom * 100)))
           .onChange(async (value) => {
             const pct = Number.parseFloat(value);
             if (!Number.isFinite(pct)) return;
-            this.plugin.settings.defaultZoom = clampZoom(pct / 100);
+            const next = clampZoom(pct / 100);
+            this.plugin.settings.defaultZoom = next;
             await this.plugin.saveSettings();
-          }),
-      );
+            // Reflect any clamped value back into the field on blur so the
+            // user sees what was actually persisted (e.g., typing 1000 → 400).
+            const persistedPct = Math.round(next * 100);
+            if (persistedPct !== Math.round(pct)) {
+              text.inputEl.value = String(persistedPct);
+            }
+          });
+      });
   }
 }

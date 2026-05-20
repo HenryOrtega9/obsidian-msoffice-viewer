@@ -3,24 +3,22 @@ import { PptxSpec } from "./spec";
 
 const SLIDE_WIDTH_IN = 13.333;
 const SLIDE_HEIGHT_IN = 7.5;
+const CUSTOM_LAYOUT = "MSOFFICE_VIEWER_WIDE";
 
 export async function buildPptx(spec: PptxSpec): Promise<ArrayBuffer> {
   const pres = new PptxGenJS();
-  pres.layout = "LAYOUT_WIDE";
+  // defineLayout + assign by name is portable across pptxgenjs versions; the
+  // string "LAYOUT_WIDE" assignment is brittle.
+  pres.defineLayout({
+    name: CUSTOM_LAYOUT,
+    width: SLIDE_WIDTH_IN,
+    height: SLIDE_HEIGHT_IN,
+  });
+  pres.layout = CUSTOM_LAYOUT;
 
-  if (spec.title) {
-    const titleSlide = pres.addSlide();
-    titleSlide.addText(spec.title, {
-      x: 0.5,
-      y: SLIDE_HEIGHT_IN / 2 - 0.75,
-      w: SLIDE_WIDTH_IN - 1,
-      h: 1.5,
-      fontSize: 44,
-      bold: true,
-      align: "center",
-      valign: "middle",
-    });
-  }
+  // No auto-title-slide here: the system prompt already instructs Claude to
+  // produce a title slide as the first entry of `slides` when appropriate.
+  // Inserting one here on top produced duplicate title slides.
 
   for (const slide of spec.slides) {
     const s = pres.addSlide();
@@ -61,9 +59,15 @@ export async function buildPptx(spec: PptxSpec): Promise<ArrayBuffer> {
       });
     }
 
-    if (slide.notes) s.addNotes(slide.notes);
+    if (slide.notes) {
+      // Strip non-printable / XML-illegal control chars so PowerPoint can
+      // open the file. Leave \t \n \r alone.
+      s.addNotes(slide.notes.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ""));
+    }
   }
 
-  const out = (await pres.write({ outputType: "arraybuffer" })) as ArrayBuffer;
-  return out;
+  const out = (await pres.write({ outputType: "arraybuffer" })) as ArrayBuffer | Uint8Array;
+  if (out instanceof ArrayBuffer) return out;
+  const u8 = out as Uint8Array;
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }

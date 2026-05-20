@@ -15,19 +15,28 @@ export async function buildXlsx(spec: XlsxSpec): Promise<ArrayBuffer> {
   const usedNames = new Set<string>();
 
   spec.sheets.forEach((sheet, i) => {
-    let name = sanitizeSheetName(sheet.name, `Sheet${i + 1}`);
+    const baseSanitized = sanitizeSheetName(sheet.name, `Sheet${i + 1}`);
+    let name = baseSanitized;
     let suffix = 2;
     while (usedNames.has(name)) {
-      const base = sanitizeSheetName(sheet.name, `Sheet${i + 1}`);
-      const candidate = `${base} (${suffix++})`;
-      name = candidate.length > 31 ? candidate.slice(0, 31) : candidate;
+      const tag = ` (${suffix++})`;
+      // Reserve room for the suffix before slicing so the unique part can't
+      // be chopped off (would otherwise infinite-loop on 31-char duplicates).
+      const stem = baseSanitized.slice(0, Math.max(1, 31 - tag.length));
+      name = stem + tag;
     }
     usedNames.add(name);
 
     const ws = wb.addWorksheet(name);
     sheet.rows.forEach((row, rowIdx) => {
       const added = ws.addRow(row.map((c) => (c === null ? null : c)));
-      if (rowIdx === 0) added.font = { bold: true };
+      if (rowIdx === 0) {
+        // Row.font setter doesn't apply to cells whose value is null. Iterate
+        // explicitly so a header row like ["A", null, "B"] still bolds A and B.
+        added.eachCell({ includeEmpty: true }, (cell) => {
+          cell.font = { bold: true };
+        });
+      }
     });
 
     const colCount = sheet.rows[0]?.length ?? 0;

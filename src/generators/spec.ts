@@ -55,9 +55,19 @@ function validateDocxBlock(b: unknown, path: string): DocxBlock {
   const obj = b as Record<string, unknown>;
   const t = obj.type;
   if (t === "heading") {
-    const level = obj.level;
-    if (level !== 1 && level !== 2 && level !== 3)
-      throw new SpecValidationError(`${path}.level: must be 1, 2, or 3`);
+    // Accept numeric strings ("1") and clamp out-of-range levels (1..3) so a
+    // pedantic JSON shape doesn't sink the whole document.
+    const rawLevel = obj.level;
+    const n =
+      typeof rawLevel === "number"
+        ? rawLevel
+        : typeof rawLevel === "string"
+          ? Number(rawLevel)
+          : NaN;
+    if (!Number.isFinite(n)) {
+      throw new SpecValidationError(`${path}.level: must be a number`);
+    }
+    const level = (Math.max(1, Math.min(3, Math.round(n))) as 1 | 2 | 3);
     if (!isStr(obj.text)) throw new SpecValidationError(`${path}.text: must be a string`);
     return { type: "heading", level, text: obj.text };
   }
@@ -68,12 +78,24 @@ function validateDocxBlock(b: unknown, path: string): DocxBlock {
   if (t === "bullets" || t === "numbered") {
     if (!isStrArr(obj.items))
       throw new SpecValidationError(`${path}.items: must be an array of strings`);
+    if (obj.items.length === 0)
+      throw new SpecValidationError(`${path}.items: must not be empty`);
     return { type: t, items: obj.items };
   }
   if (t === "table") {
     const rows = obj.rows;
     if (!Array.isArray(rows) || !rows.every((r) => isStrArr(r)))
       throw new SpecValidationError(`${path}.rows: must be a 2D array of strings`);
+    if (rows.length === 0)
+      throw new SpecValidationError(`${path}.rows: must not be empty`);
+    const width = (rows[0] as string[]).length;
+    if (width === 0)
+      throw new SpecValidationError(`${path}.rows[0]: header row must not be empty`);
+    if (!(rows as string[][]).every((r) => r.length === width)) {
+      throw new SpecValidationError(
+        `${path}.rows: every row must have ${width} cells (header width)`,
+      );
+    }
     return { type: "table", rows: rows as string[][] };
   }
   throw new SpecValidationError(`${path}.type: unknown block type "${String(t)}"`);
@@ -153,14 +175,45 @@ export function validateSpec(kind: FileKind, raw: unknown): CreateSpec {
 
 export function extractJsonFromResponse(raw: string): unknown {
   let s = raw.trim();
-  // Strip ```json ... ``` or ``` ... ``` fences if present
-  const fence = s.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  // Strip a ```json … ``` / ``` … ``` fence wherever it appears, even if
+  // prose follows the fence. Non-anchored so trailing model commentary
+  // doesn't defeat the match.
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fence) s = fence[1].trim();
-  // If extra prose surrounds the JSON, try to slice from first { to last }
+  // If we still don't start with `{`, walk the string and find the first
+  // top-level balanced `{ … }` (respecting strings + escapes). This is more
+  // robust than slice(first-`{`, last-`}`) when there are stray braces in
+  // surrounding prose or trailing remarks.
   if (!s.startsWith("{")) {
-    const first = s.indexOf("{");
-    const last = s.lastIndexOf("}");
-    if (first !== -1 && last > first) s = s.slice(first, last + 1);
+    const sliced = extractFirstJsonObject(s);
+    if (sliced !== null) s = sliced;
   }
   return JSON.parse(s);
+}
+
+function extractFirstJsonObject(s: string): string | null {
+  const start = s.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return null;
 }

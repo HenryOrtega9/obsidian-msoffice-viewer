@@ -65,6 +65,9 @@ export class XlsxPreviewView extends OfficeFileView {
         console.error("ExcelJS grid render failed; falling back to LibreOffice PDF:", e);
         new Notice("Grid rendering failed; using PDF fallback.");
         if (this.file !== file || !this.renderEl) return;
+        // resetState before empty() so a half-built tabsEl (which lives
+        // outside renderEl) doesn't ghost beneath the PDF fallback.
+        this.resetState();
         this.renderEl.empty();
       }
     }
@@ -175,10 +178,17 @@ interface MergeRect {
 }
 
 function renderSheetIntoGrid(ws: ExcelJS.Worksheet, container: HTMLElement): void {
-  const lastCol = Math.max(1, ws.actualColumnCount || ws.columnCount || 1);
-  const lastRow = Math.max(1, ws.actualRowCount || ws.rowCount || 1);
-
   const merges = collectMerges(ws);
+  // Extend dimensions to cover every merge bound so anchor cells that sit
+  // beyond actualColumnCount/actualRowCount still get rendered (and the
+  // spans never overrun the colgroup).
+  let lastCol = Math.max(1, ws.actualColumnCount || ws.columnCount || 1);
+  let lastRow = Math.max(1, ws.actualRowCount || ws.rowCount || 1);
+  for (const m of merges) {
+    if (m.right > lastCol) lastCol = m.right;
+    if (m.bottom > lastRow) lastRow = m.bottom;
+  }
+
   const skipMap = computeMergeSkipMap(merges);
   const mergeAnchor = new Map<string, MergeRect>();
   for (const m of merges) mergeAnchor.set(`${m.top}:${m.left}`, m);
@@ -289,8 +299,19 @@ function cellText(cell: ExcelJS.Cell): string {
   const raw = extractCellValue(cell);
   if (raw == null) return "";
   if (typeof raw === "string") return raw;
-  if (typeof raw === "boolean") return raw ? "TRUE" : "FALSE";
   const fmt = cell.numFmt;
+  if (typeof raw === "boolean") {
+    // Workbooks can format booleans via custom codes ("Yes";"No"). Try the
+    // numfmt path first; fall back to plain TRUE/FALSE.
+    if (fmt && fmt !== "General") {
+      try {
+        return numfmtFormat(fmt, raw ? 1 : 0);
+      } catch {
+        // fall through
+      }
+    }
+    return raw ? "TRUE" : "FALSE";
+  }
   if (raw instanceof Date) {
     if (fmt && fmt !== "General") {
       try {
@@ -424,13 +445,11 @@ function quoteFont(name: string): string {
 
 function argbToCss(argb: string): string {
   // ExcelJS hands us 8 hex chars (alpha first). CSS hex with alpha is RRGGBBAA.
-  if (argb.length === 8) {
-    const a = argb.slice(0, 2);
-    const rgb = argb.slice(2);
-    return a === "FF" ? `#${rgb}` : `#${rgb}${a}`;
-  }
-  if (argb.length === 6) return `#${argb}`;
-  return `#${argb.slice(-6)}`;
+  // Pad short inputs to a full 8-hex ARGB so we never emit malformed CSS.
+  const padded = argb.length >= 8 ? argb : argb.padStart(8, "F");
+  const a = padded.slice(-8, -6).toUpperCase();
+  const rgb = padded.slice(-6);
+  return a === "FF" ? `#${rgb}` : `#${rgb}${a}`;
 }
 
 function borderCss(b: Partial<ExcelJS.Border>): string {
@@ -487,8 +506,10 @@ function resolveExcelColor(color: ExcelColorRef | undefined | null): string | nu
   if (color.argb) return argbToCss(color.argb);
   if (typeof color.theme === "number") {
     const hex = DEFAULT_THEME_RGB[color.theme];
-    if (!hex) return null;
-    return applyTint(hex, color.tint ?? 0);
+    if (hex) return applyTint(hex, color.tint ?? 0);
+    // Fall through: workbooks can carry both a theme ref and an indexed
+    // fallback. If the theme index is out of range (custom themes can
+    // exceed 11), try indexed before giving up.
   }
   if (typeof color.indexed === "number") {
     const hex = INDEXED_COLORS[color.indexed];

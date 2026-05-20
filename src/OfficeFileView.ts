@@ -5,6 +5,7 @@ import {
   ensurePdfjsWorker,
   pluginCacheDir,
   renderPdfPagesIntoStage,
+  type PdfRenderHandle,
 } from "./officeToPdf";
 
 interface ElectronShellLike {
@@ -29,6 +30,7 @@ export abstract class OfficeFileView extends FileView {
   protected toolbarEl: HTMLElement | null = null;
   private zoomIndicatorEl: HTMLElement | null = null;
   private zoom = DEFAULT_ZOOM;
+  private activePdfRender: PdfRenderHandle | null = null;
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf);
@@ -43,6 +45,7 @@ export abstract class OfficeFileView extends FileView {
   }
 
   async onLoadFile(file: TFile): Promise<void> {
+    this.cancelActivePdfRender();
     this.contentEl.empty();
     this.contentEl.addClass("docx-claude-view");
 
@@ -60,10 +63,18 @@ export abstract class OfficeFileView extends FileView {
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
+    this.cancelActivePdfRender();
     this.contentEl.empty();
     this.renderEl = null;
     this.toolbarEl = null;
     this.zoomIndicatorEl = null;
+  }
+
+  protected cancelActivePdfRender(): void {
+    if (this.activePdfRender) {
+      try { this.activePdfRender.cancel(); } catch { /* ignore */ }
+      this.activePdfRender = null;
+    }
   }
 
   protected appendBelowRender(el: HTMLElement): void {
@@ -97,15 +108,24 @@ export abstract class OfficeFileView extends FileView {
     if (this.file !== file || !this.renderEl) return;
     this.renderEl.empty();
     const stage = this.renderEl.createDiv({ cls: "docx-claude-pdf-stage" });
-    const pages = await renderPdfPagesIntoStage(
+    this.cancelActivePdfRender();
+    const handle = renderPdfPagesIntoStage(
       pdfPath,
       stage,
       "docx-claude-pdf-slide",
       "docx-claude-pdf-canvas",
       { isStale: () => this.file !== file },
     );
-    if (pages.length === 0 || pages.every((p) => p.failed)) {
-      throw new Error("LibreOffice PDF produced no renderable pages.");
+    this.activePdfRender = handle;
+    try {
+      const pages = await handle.pages;
+      if (this.activePdfRender === handle) this.activePdfRender = null;
+      if (pages.length === 0 || pages.every((p) => p.failed)) {
+        throw new Error("LibreOffice PDF produced no renderable pages.");
+      }
+    } catch (e) {
+      if (this.activePdfRender === handle) this.activePdfRender = null;
+      throw e;
     }
   }
 
