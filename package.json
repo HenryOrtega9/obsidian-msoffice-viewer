@@ -1,14 +1,21 @@
 {
-  "name": "obsidian-docx-claude",
-  "version": "0.1.0",
-  "description": "Read-only .docx preview for Obsidian with zoom.",
+  "name": "obsidian-msoffice-viewer",
+  "version": "0.2.0",
+  "description": "Read-only viewer for .docx, .pptx, .xlsx, and .xls inside Obsidian.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit && node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": ["obsidian", "docx", "preview"],
+  "keywords": [
+    "obsidian",
+    "docx",
+    "pptx",
+    "xlsx",
+    "office",
+    "preview"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -17,6 +24,8 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "docx-preview": "^0.3.0"
+    "docx-preview": "^0.3.0",
+    "pptx-preview": "^1.0.7",
+    "xlsx": "^0.18.5"
   }
 }

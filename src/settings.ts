@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
-import type DocxClaudePlugin from "./main";
+import type MsOfficeViewerPlugin from "./main";
 
 export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 4.0;
@@ -20,9 +20,9 @@ export function clampZoom(z: number): number {
 }
 
 export class DocxPreviewSettingTab extends PluginSettingTab {
-  plugin: DocxClaudePlugin;
+  plugin: MsOfficeViewerPlugin;
 
-  constructor(app: App, plugin: DocxClaudePlugin) {
+  constructor(app: App, plugin: MsOfficeViewerPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
@@ -33,7 +33,7 @@ export class DocxPreviewSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Default zoom")
-      .setDesc(`Starting zoom level for newly opened .docx files. ${Math.round(MIN_ZOOM * 100)}%–${Math.round(MAX_ZOOM * 100)}%.`)
+      .setDesc(`Starting zoom level for newly opened Office files. ${Math.round(MIN_ZOOM * 100)}%–${Math.round(MAX_ZOOM * 100)}%.`)
       .addText((text) =>
         text
           .setPlaceholder("100")

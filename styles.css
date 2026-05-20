@@ -1,4 +1,5 @@
-/* docx-preview plugin styles */
+/* Microsoft Office Viewer plugin styles
+   (class prefix kept as docx-claude- to avoid churn from earlier name) */
 
 .docx-claude-view {
   display: flex;
@@ -44,6 +45,11 @@
   color: var(--text-faint);
 }
 
+.docx-claude-open-external {
+  margin-left: auto;
+  padding: 0.15rem 0.75rem;
+}
+
 .docx-claude-render {
   flex: 1;
   overflow: auto;
@@ -60,4 +66,72 @@
 .docx-claude-render .docx-claude-wrapper {
   background: var(--background-primary) !important;
   padding: 1rem 0 !important;
+}
+
+/* pptx-preview slide stack */
+.docx-claude-pptx-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+}
+
+/* xlsx rendered sheet */
+.docx-claude-xlsx-sheet {
+  padding: 0.5rem 1rem 1rem;
+  color: var(--text-normal);
+}
+
+.docx-claude-xlsx-sheet table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  background: var(--background-primary);
+}
+
+.docx-claude-xlsx-sheet th,
+.docx-claude-xlsx-sheet td {
+  border: 1px solid var(--background-modifier-border);
+  padding: 0.2rem 0.5rem;
+  min-width: 1.5rem;
+  white-space: nowrap;
+}
+
+.docx-claude-xlsx-sheet thead th,
+.docx-claude-xlsx-sheet tr:first-child td {
+  background: var(--background-secondary);
+  font-weight: 600;
+}
+
+/* xlsx bottom tab strip */
+.docx-claude-xlsx-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.docx-claude-xlsx-tab {
+  padding: 0.15rem 0.75rem;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.docx-claude-xlsx-tab:hover {
+  background: var(--background-modifier-hover);
+}
+
+.docx-claude-xlsx-tab.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
 }
