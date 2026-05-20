@@ -50,17 +50,17 @@
   background: var(--background-primary);
 }
 
-/* docx-preview wraps its output in .docx-wrapper with a hardcoded grey
-   "page gutter" background. Override to the Obsidian theme; the page
-   itself (.docx-claude, set via renderAsync className option) keeps its
-   own paper-like background so the document stays legible against both
-   light and dark themes. */
-.docx-claude-render .docx-wrapper {
+/* docx-preview emits its outer wrapper as `${className}-wrapper` — with
+   our className="docx-claude" option that becomes .docx-claude-wrapper.
+   Its default style is `background: gray`; override to the Obsidian
+   theme so the gutter follows the active palette. The page section
+   itself (section.docx-claude) keeps its paper-white background for
+   legibility against both light and dark themes. */
+.docx-claude-render .docx-claude-wrapper {
   background: var(--background-primary) !important;
-  padding: 1rem 0;
+  padding: 1rem 0 !important;
 }
 
-.docx-claude {
-  padding: 1rem 2rem;
+section.docx-claude {
   color: var(--text-normal);
 }
