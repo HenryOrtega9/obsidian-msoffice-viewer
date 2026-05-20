@@ -1,9 +1,9 @@
 {
   "id": "obsidian-docx-claude",
-  "name": "Docx + Claude",
-  "version": "0.0.1",
+  "name": "Docx Preview",
+  "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Preview .docx files inline and route edits through claude-cli-chat. Read-only render with Claude-mediated targeted edits.",
-  "author": "obsidian-docx-claude",
-  "isDesktopOnly": true
+  "description": "Read-only .docx preview with zoom (in/out/reset).",
+  "author": "Henry Ortega",
+  "isDesktopOnly": false
 }

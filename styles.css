@@ -1,44 +1,56 @@
-/* docx-claude plugin styles */
+/* docx-preview plugin styles */
 
-.docx-claude {
-  padding: 1rem 2rem;
+.docx-claude-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.docx-claude-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  flex-shrink: 0;
+}
+
+.docx-claude-zoom-btn {
+  min-width: 2rem;
+  padding: 0.15rem 0.5rem;
   background: var(--background-primary);
   color: var(--text-normal);
-}
-
-.docx-claude p {
-  cursor: text;
-}
-
-.docx-claude-drift-warning {
-  margin: 0.5rem 1rem;
-  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
-  background: var(--background-modifier-error);
-  color: var(--text-on-accent);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.docx-claude-zoom-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.docx-claude-zoom-pct {
+  min-width: 3rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
   font-size: 0.85em;
 }
 
-.docx-claude-modal-selection {
-  margin-bottom: 0.75rem;
-  padding: 0.5rem;
-  background: var(--background-secondary);
-  border-radius: 4px;
-  font-style: italic;
-  white-space: pre-wrap;
-  max-height: 8rem;
-  overflow-y: auto;
+.docx-claude-zoom-pct.at-bound {
+  color: var(--text-faint);
 }
 
-.docx-claude-modal-instruction {
-  width: 100%;
-  min-height: 6rem;
-  font-family: var(--font-text);
+.docx-claude-render {
+  flex: 1;
+  overflow: auto;
+  background: var(--background-primary);
 }
 
-.docx-claude-modal-buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+.docx-claude {
+  padding: 1rem 2rem;
+  color: var(--text-normal);
 }

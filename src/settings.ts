@@ -1,19 +1,25 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type DocxClaudePlugin from "./main";
 
-export interface DocxClaudeSettings {
-  pandocPath: string;
-  maxHistory: number;
-  warnAfterNRoundtrips: number;
+export const MIN_ZOOM = 0.25;
+export const MAX_ZOOM = 4.0;
+export const ZOOM_STEP = 0.1;
+export const DEFAULT_ZOOM = 1.0;
+
+export interface DocxPreviewSettings {
+  defaultZoom: number;
 }
 
-export const DEFAULT_SETTINGS: DocxClaudeSettings = {
-  pandocPath: "pandoc",
-  maxHistory: 20,
-  warnAfterNRoundtrips: 3,
+export const DEFAULT_SETTINGS: DocxPreviewSettings = {
+  defaultZoom: DEFAULT_ZOOM,
 };
 
-export class DocxClaudeSettingTab extends PluginSettingTab {
+export function clampZoom(z: number): number {
+  if (!Number.isFinite(z)) return DEFAULT_ZOOM;
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+export class DocxPreviewSettingTab extends PluginSettingTab {
   plugin: DocxClaudePlugin;
 
   constructor(app: App, plugin: DocxClaudePlugin) {
@@ -26,51 +32,17 @@ export class DocxClaudeSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName("Pandoc path")
-      .setDesc(
-        "Path to the pandoc binary used for markdown -> docx round-trip edits. Install with: brew install pandoc",
-      )
+      .setName("Default zoom")
+      .setDesc(`Starting zoom level for newly opened .docx files. ${Math.round(MIN_ZOOM * 100)}%–${Math.round(MAX_ZOOM * 100)}%.`)
       .addText((text) =>
         text
-          .setPlaceholder("pandoc")
-          .setValue(this.plugin.settings.pandocPath)
+          .setPlaceholder("100")
+          .setValue(String(Math.round(this.plugin.settings.defaultZoom * 100)))
           .onChange(async (value) => {
-            this.plugin.settings.pandocPath = value.trim() || "pandoc";
+            const pct = Number.parseFloat(value);
+            if (!Number.isFinite(pct)) return;
+            this.plugin.settings.defaultZoom = clampZoom(pct / 100);
             await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Max history snapshots per file")
-      .setDesc(
-        "Older snapshots are pruned after this count. Stored under <plugin>/history/<basename>/.",
-      )
-      .addText((text) =>
-        text
-          .setValue(String(this.plugin.settings.maxHistory))
-          .onChange(async (value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isNaN(n) && n >= 0) {
-              this.plugin.settings.maxHistory = n;
-              await this.plugin.saveSettings();
-            }
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Warn after N round-trip edits")
-      .setDesc(
-        "Show a drift warning in the preview after this many markdown round-trip edits in a session.",
-      )
-      .addText((text) =>
-        text
-          .setValue(String(this.plugin.settings.warnAfterNRoundtrips))
-          .onChange(async (value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isNaN(n) && n >= 0) {
-              this.plugin.settings.warnAfterNRoundtrips = n;
-              await this.plugin.saveSettings();
-            }
           }),
       );
   }
