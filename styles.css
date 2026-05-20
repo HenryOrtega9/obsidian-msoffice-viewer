@@ -54,6 +54,29 @@
   flex: 1;
   overflow: auto;
   background: var(--background-primary);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+.docx-claude-render * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Keep pointer cursor on interactive bits even though the parent uses text cursor */
+.docx-claude-toolbar,
+.docx-claude-toolbar *,
+.docx-claude-xlsx-tabs,
+.docx-claude-xlsx-tabs * {
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.docx-claude-zoom-btn,
+.docx-claude-xlsx-tab {
+  cursor: pointer;
 }
 
 /* docx-preview emits its outer wrapper as `${className}-wrapper` — with
@@ -75,6 +98,53 @@
   align-items: center;
   gap: 1rem;
   padding: 1rem 0;
+}
+
+/* Each slide rendered to its own canvas. */
+.docx-claude-pptx-slide {
+  width: 100%;
+  max-width: 1280px;
+  display: flex;
+  justify-content: center;
+}
+
+.docx-claude-pptx-canvas {
+  width: 100%;
+  max-width: 1280px;
+  height: auto;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+}
+
+/* Fallback card shown when pptx-preview's parser silently drops a slide. */
+.docx-claude-pptx-fallback {
+  width: 960px;
+  max-width: 100%;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  border: 1px dashed var(--background-modifier-border);
+  box-sizing: border-box;
+}
+
+.docx-claude-pptx-fallback-title {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.docx-claude-pptx-fallback-body p {
+  margin: 0.25rem 0;
+  line-height: 1.45;
+}
+
+.docx-claude-pptx-fallback-empty {
+  color: var(--text-faint);
+  font-style: italic;
 }
 
 /* xlsx rendered sheet */
@@ -134,4 +204,38 @@
   background: var(--interactive-accent);
   color: var(--text-on-accent);
   border-color: var(--interactive-accent);
+}
+
+/* Create modal */
+.docx-claude-create-label {
+  display: block;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.docx-claude-create-textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-text);
+  padding: 0.5rem;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.docx-claude-create-status {
+  margin-top: 0.5rem;
+  min-height: 1.2em;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.docx-claude-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }

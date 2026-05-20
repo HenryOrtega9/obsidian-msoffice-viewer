@@ -1,8 +1,10 @@
-import { Plugin, WorkspaceLeaf } from "obsidian";
+import { Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { OfficeFileView } from "./OfficeFileView";
 import { DOCX_CLAUDE_VIEW_TYPE, DocxPreviewView } from "./DocxPreviewView";
 import { PPTX_CLAUDE_VIEW_TYPE, PptxPreviewView } from "./PptxPreviewView";
 import { XLSX_CLAUDE_VIEW_TYPE, XlsxPreviewView } from "./XlsxPreviewView";
+import { ClaudeBridge } from "./ClaudeBridge";
+import { CreateModal } from "./CreateModal";
 import {
   DEFAULT_SETTINGS,
   DocxPreviewSettingTab,
@@ -54,6 +56,15 @@ export default class MsOfficeViewerPlugin extends Plugin {
       checkCallback: (checking) => this.withActiveView(checking, (v) => v.resetZoom()),
     });
 
+    this.addCommand({
+      id: "msoffice-create-with-claude",
+      name: "Create Office file with Claude",
+      callback: () => {
+        const bridge = new ClaudeBridge(this.app);
+        new CreateModal(this.app, bridge, (file) => this.openOfficeFile(file)).open();
+      },
+    });
+
     this.addSettingTab(new DocxPreviewSettingTab(this.app, this));
   }
 
@@ -67,6 +78,20 @@ export default class MsOfficeViewerPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  private async openOfficeFile(file: TFile): Promise<void> {
+    const viewType =
+      file.extension === "docx"
+        ? DOCX_CLAUDE_VIEW_TYPE
+        : file.extension === "pptx"
+          ? PPTX_CLAUDE_VIEW_TYPE
+          : file.extension === "xlsx" || file.extension === "xls"
+            ? XLSX_CLAUDE_VIEW_TYPE
+            : null;
+    if (!viewType) return;
+    const leaf = this.app.workspace.getLeaf(true);
+    await leaf.setViewState({ type: viewType, state: { file: file.path }, active: true });
   }
 
   private withActiveView(
