@@ -1,9 +1,9 @@
 {
   "id": "obsidian-msoffice-viewer",
   "name": "Microsoft Office Viewer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minAppVersion": "1.5.0",
   "description": "Read-only viewer for .docx, .pptx, .xlsx, and .xls with zoom and an Open in Word/PowerPoint/Excel handoff.",
   "author": "Henry Ortega",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }

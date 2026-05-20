@@ -17,6 +17,8 @@ export default class MsOfficeViewerPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
 
+    OfficeFileView.pluginId = this.manifest.id;
+
     this.registerView(DOCX_CLAUDE_VIEW_TYPE, (leaf: WorkspaceLeaf) => {
       const view = new DocxPreviewView(leaf);
       view.setInitialZoom(this.settings.defaultZoom);

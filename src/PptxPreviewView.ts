@@ -2,14 +2,12 @@ import { Notice, TFile } from "obsidian";
 import { PPTXViewer } from "pptxviewjs";
 import JSZip from "jszip";
 import { OfficeFileView } from "./OfficeFileView";
+import { findSoffice } from "./officeToPdf";
 
 export const PPTX_CLAUDE_VIEW_TYPE = "pptx-claude-view";
 
-// PowerPoint widescreen default is 12192000 x 6858000 EMU = 13.33" x 7.5"
-// = 1920 x 1080 at 144 DPI. Render at retina (2x) sharpness so detail holds
-// up when the user scales/zooms.
-const SLIDE_WIDTH = 1920;
-const SLIDE_HEIGHT = 1080;
+const FALLBACK_SLIDE_WIDTH = 1920;
+const FALLBACK_SLIDE_HEIGHT = 1080;
 
 export class PptxPreviewView extends OfficeFileView {
   getViewType(): string {
@@ -35,11 +33,33 @@ export class PptxPreviewView extends OfficeFileView {
   protected async renderFile(file: TFile): Promise<void> {
     if (!this.renderEl) return;
     this.renderEl.empty();
-    const stage = this.renderEl.createDiv({ cls: "docx-claude-pptx-stage" });
+
+    const sofficeBin = await findSoffice();
+    if (sofficeBin) {
+      try {
+        await this.renderViaLibreOfficePdf(file, sofficeBin, "pptx");
+        return;
+      } catch (e) {
+        console.error("LibreOffice render failed; falling back to pptxviewjs:", e);
+        new Notice("LibreOffice rendering failed; using fallback renderer.");
+      }
+    } else {
+      new Notice(
+        "LibreOffice not found; rendering with the JS fallback (lower fidelity).",
+        4000,
+      );
+    }
+
+    if (this.file !== file || !this.renderEl) return;
+    this.renderEl.empty();
+    await this.renderViaPptxViewJS(file);
+  }
+
+  private async renderViaPptxViewJS(file: TFile): Promise<void> {
+    if (!this.renderEl) return;
+    const stage = this.renderEl.createDiv({ cls: "docx-claude-pdf-stage" });
     const buf = await this.app.vault.readBinary(file);
 
-    // Read the zip ourselves so we always know the true slide list, even if
-    // pptxviewjs's loader bails out partway through.
     const zip = await JSZip.loadAsync(buf);
     const slidePaths: string[] = [];
     zip.forEach((relPath) => {
@@ -47,7 +67,6 @@ export class PptxPreviewView extends OfficeFileView {
     });
     slidePaths.sort((a, b) => slideIndex(a) - slideIndex(b));
     const totalSlides = slidePaths.length;
-
     if (totalSlides === 0) {
       new Notice("No slides found in this .pptx file.");
       return;
@@ -60,53 +79,52 @@ export class PptxPreviewView extends OfficeFileView {
       await viewer.loadFile(buf);
       viewerSlideCount = viewer.getSlideCount();
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("pptxviewjs load failed; falling back to text-only rendering:", e);
+      console.error("pptxviewjs load failed:", e);
       viewer = null;
     }
 
     const visualSuccess: number[] = [];
     const textFallback: number[] = [];
 
-    for (let i = 0; i < totalSlides; i++) {
-      const oneIdx = i + 1;
-      const hasViewerSlide = viewer && i < viewerSlideCount;
-      let renderedVisually = false;
-
-      if (hasViewerSlide) {
-        const canvasWrap = stage.createDiv({ cls: "docx-claude-pptx-slide" });
-        const canvas = canvasWrap.createEl("canvas", {
-          cls: "docx-claude-pptx-canvas",
-        });
-        canvas.width = SLIDE_WIDTH;
-        canvas.height = SLIDE_HEIGHT;
-        try {
-          await viewer!.renderSlide(i, canvas, { quality: "high" });
-          renderedVisually = true;
-          visualSuccess.push(oneIdx);
-        } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error(`pptxviewjs render failed on slide ${oneIdx}:`, e);
-          canvasWrap.remove();
+    try {
+      for (let i = 0; i < totalSlides; i++) {
+        if (this.file !== file) break;
+        const oneIdx = i + 1;
+        let renderedVisually = false;
+        if (viewer && i < viewerSlideCount) {
+          const canvasWrap = stage.createDiv({ cls: "docx-claude-pdf-slide" });
+          const canvas = canvasWrap.createEl("canvas", { cls: "docx-claude-pdf-canvas" });
+          canvas.width = FALLBACK_SLIDE_WIDTH;
+          canvas.height = FALLBACK_SLIDE_HEIGHT;
+          try {
+            await viewer.renderSlide(i, canvas, { quality: "high" });
+            renderedVisually = true;
+            visualSuccess.push(oneIdx);
+          } catch (e) {
+            console.error(`pptxviewjs render failed on slide ${oneIdx}:`, e);
+            canvasWrap.remove();
+          }
+        }
+        if (!renderedVisually) {
+          try {
+            const xml = await zip.file(slidePaths[i])!.async("text");
+            this.renderTextFallback(stage, oneIdx, xml);
+            textFallback.push(oneIdx);
+          } catch (e) {
+            console.error(`Text fallback failed on slide ${oneIdx}:`, e);
+          }
         }
       }
-
-      if (!renderedVisually) {
-        try {
-          const xml = await zip.file(slidePaths[i])!.async("text");
-          this.renderTextFallback(stage, oneIdx, xml);
-          textFallback.push(oneIdx);
-        } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error(`Text fallback failed on slide ${oneIdx}:`, e);
-        }
-      }
+    } finally {
+      viewer?.destroy();
     }
 
-    if (viewer) viewer.destroy();
-
-    const summary = this.buildSummary(totalSlides, visualSuccess.length, textFallback.length);
-    if (summary) new Notice(summary, 6000);
+    if (visualSuccess.length < totalSlides) {
+      const parts = [`Rendered ${visualSuccess.length} of ${totalSlides} slides visually.`];
+      if (textFallback.length > 0) parts.push(`${textFallback.length} shown as text only.`);
+      parts.push("Use Open in PowerPoint for the full deck.");
+      new Notice(parts.join(" "), 6000);
+    }
   }
 
   private renderTextFallback(parent: HTMLElement, oneBasedIndex: number, xml: string): void {
@@ -126,18 +144,10 @@ export class PptxPreviewView extends OfficeFileView {
     }
     for (const run of runs) body.createEl("p", { text: run });
   }
-
-  private buildSummary(total: number, visual: number, fallback: number): string | null {
-    if (visual === total) return null;
-    const parts = [`Rendered ${visual} of ${total} slides visually.`];
-    if (fallback > 0) parts.push(`${fallback} shown as text only.`);
-    parts.push("Use Open in PowerPoint for the full deck.");
-    return parts.join(" ");
-  }
 }
 
-function slideIndex(path: string): number {
-  const m = path.match(/slide(\d+)\.xml$/);
+function slideIndex(p: string): number {
+  const m = p.match(/slide(\d+)\.xml$/);
   return m ? parseInt(m[1], 10) : 0;
 }
 

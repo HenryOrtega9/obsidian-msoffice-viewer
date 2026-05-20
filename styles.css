@@ -91,8 +91,9 @@
   padding: 1rem 0 !important;
 }
 
-/* pptx-preview slide stack */
-.docx-claude-pptx-stage {
+/* Shared stack used by the LibreOffice→PDF→PDF.js path (pptx + xlsx) and the
+   pptxviewjs canvas fallback. */
+.docx-claude-pdf-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -100,21 +101,39 @@
   padding: 1rem 0;
 }
 
-/* Each slide rendered to its own canvas. */
-.docx-claude-pptx-slide {
+.docx-claude-pdf-slide {
   width: 100%;
   max-width: 1280px;
   display: flex;
   justify-content: center;
 }
 
-.docx-claude-pptx-canvas {
+.docx-claude-pdf-canvas {
   width: 100%;
   max-width: 1280px;
   height: auto;
   background: #ffffff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   border-radius: 4px;
+}
+
+.docx-claude-pdf-loading {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.docx-claude-pdf-error {
+  width: 100%;
+  max-width: 1280px;
+  padding: 1rem 1.25rem;
+  background: var(--background-secondary);
+  color: var(--text-error);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+  font-size: 0.85em;
+  box-sizing: border-box;
 }
 
 /* Fallback card shown when pptx-preview's parser silently drops a slide. */
@@ -147,30 +166,75 @@
   font-style: italic;
 }
 
-/* xlsx rendered sheet */
-.docx-claude-xlsx-sheet {
-  padding: 0.5rem 1rem 1rem;
-  color: var(--text-normal);
+/* xlsx ExcelJS grid — hardcoded to an Excel-light look so workbook contents
+   stay readable regardless of Obsidian's theme. Cells with their own Excel
+   fills still override `background-color` via inline style. */
+.docx-claude-xlsx-grid {
+  color: #1f1f1f;
+  background: #ffffff;
 }
 
-.docx-claude-xlsx-sheet table {
-  border-collapse: collapse;
+.docx-claude-xlsx-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-text);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  background: var(--background-primary);
+  background: #ffffff;
 }
 
-.docx-claude-xlsx-sheet th,
-.docx-claude-xlsx-sheet td {
-  border: 1px solid var(--background-modifier-border);
-  padding: 0.2rem 0.5rem;
-  min-width: 1.5rem;
+.docx-claude-xlsx-table th,
+.docx-claude-xlsx-table td {
+  border-right: 1px solid #d4d4d4;
+  border-bottom: 1px solid #d4d4d4;
+  padding: 2px 6px;
+  min-width: 32px;
   white-space: nowrap;
+  color: #1f1f1f;
+  background: #ffffff;
 }
 
-.docx-claude-xlsx-sheet thead th,
-.docx-claude-xlsx-sheet tr:first-child td {
-  background: var(--background-secondary);
+/* Sticky column-letter row (A, B, C…). Sticks to the top while you scroll
+   vertically; sits below the toolbar visually because the toolbar is outside
+   this scroll container. */
+.docx-claude-xlsx-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f2f2f2;
   font-weight: 600;
+  text-align: center;
+  color: #444444;
+  border-top: 1px solid #d4d4d4;
+}
+
+/* Sticky row-number column (1, 2, 3…). Sticks to the left while you scroll
+   horizontally. */
+.docx-claude-xlsx-table tbody th.docx-claude-xlsx-rowhdr {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #f2f2f2;
+  font-weight: 600;
+  text-align: center;
+  color: #444444;
+  min-width: 40px;
+  border-left: 1px solid #d4d4d4;
+}
+
+/* Top-left corner: sticky on both axes so it always shows. */
+.docx-claude-xlsx-table .docx-claude-xlsx-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: #f2f2f2;
+  min-width: 40px;
+  border-left: 1px solid #d4d4d4;
+}
+
+.docx-claude-xlsx-rowhdr-col {
+  width: 40px;
 }
 
 /* xlsx bottom tab strip */

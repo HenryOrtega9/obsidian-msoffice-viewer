@@ -1,6 +1,6 @@
 {
   "name": "obsidian-msoffice-viewer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Read-only viewer for .docx, .pptx, .xlsx, and .xls inside Obsidian.",
   "main": "main.js",
   "scripts": {
@@ -29,10 +29,9 @@
     "docx-preview": "^0.3.0",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
+    "numfmt": "^3.2.6",
     "pdfjs-dist": "^5.7.284",
-    "pptx-preview": "^1.0.7",
     "pptxgenjs": "^4.0.1",
-    "pptxviewjs": "^1.1.9",
-    "xlsx": "^0.18.5"
+    "pptxviewjs": "^1.1.9"
   }
 }

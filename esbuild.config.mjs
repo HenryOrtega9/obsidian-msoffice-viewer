@@ -1,14 +1,24 @@
 import esbuild from "esbuild";
 import { builtinModules } from "module";
 import process from "process";
+import { readFileSync } from "node:fs";
 
 const production = process.argv[2] === "production";
 
 const banner = `/*
- * obsidian-docx-claude
+ * obsidian-msoffice-viewer
  * Bundled by esbuild.
  */
 `;
+
+// Inline pdf.js worker source so the plugin stays single-file. PDF.js requires
+// a worker; we read the minified worker once at build time and feed it into
+// the bundle as a string constant. At runtime the plugin creates a blob URL
+// and points GlobalWorkerOptions.workerSrc at it.
+const pdfjsWorkerSource = readFileSync(
+  "node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
+  "utf-8",
+);
 
 const context = await esbuild.context({
   banner: { js: banner },
@@ -30,6 +40,9 @@ const context = await esbuild.context({
     "@lezer/lr",
     ...builtinModules,
   ],
+  define: {
+    __PDFJS_WORKER_SOURCE__: JSON.stringify(pdfjsWorkerSource),
+  },
   format: "cjs",
   target: "es2018",
   logLevel: "info",

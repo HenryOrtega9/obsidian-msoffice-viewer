@@ -1,5 +1,11 @@
 import { FileSystemAdapter, FileView, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, clampZoom } from "./settings";
+import {
+  convertOfficeToPdf,
+  ensurePdfjsWorker,
+  pluginCacheDir,
+  renderPdfPagesIntoStage,
+} from "./officeToPdf";
 
 interface ElectronShellLike {
   openPath(path: string): Promise<string>;
@@ -16,6 +22,9 @@ function loadElectronShell(): ElectronShellLike | null {
 }
 
 export abstract class OfficeFileView extends FileView {
+  // Set by main.ts at plugin load so the cache dir tracks the manifest id.
+  static pluginId = "obsidian-msoffice-viewer";
+
   protected renderEl: HTMLElement | null = null;
   protected toolbarEl: HTMLElement | null = null;
   private zoomIndicatorEl: HTMLElement | null = null;
@@ -59,6 +68,45 @@ export abstract class OfficeFileView extends FileView {
 
   protected appendBelowRender(el: HTMLElement): void {
     this.contentEl.appendChild(el);
+  }
+
+  // Shared LibreOffice → PDF → PDF.js pipeline. Throws if every page failed
+  // (callers fall back to the JS renderer). The guard against this.file
+  // changing lets us bail cleanly if the user switches files mid-render.
+  protected async renderViaLibreOfficePdf(
+    file: TFile,
+    sofficeBin: string,
+    ext: string,
+  ): Promise<void> {
+    if (!this.renderEl) return;
+    const loadingStage = this.renderEl.createDiv({ cls: "docx-claude-pdf-stage" });
+    loadingStage
+      .createDiv({ cls: "docx-claude-pdf-loading" })
+      .setText("Rendering with LibreOffice…");
+
+    await ensurePdfjsWorker(this.app, OfficeFileView.pluginId);
+
+    const buf = await this.app.vault.readBinary(file);
+    const pdfPath = await convertOfficeToPdf(
+      sofficeBin,
+      buf,
+      ext,
+      pluginCacheDir(OfficeFileView.pluginId),
+    );
+
+    if (this.file !== file || !this.renderEl) return;
+    this.renderEl.empty();
+    const stage = this.renderEl.createDiv({ cls: "docx-claude-pdf-stage" });
+    const pages = await renderPdfPagesIntoStage(
+      pdfPath,
+      stage,
+      "docx-claude-pdf-slide",
+      "docx-claude-pdf-canvas",
+      { isStale: () => this.file !== file },
+    );
+    if (pages.length === 0 || pages.every((p) => p.failed)) {
+      throw new Error("LibreOffice PDF produced no renderable pages.");
+    }
   }
 
   private buildToolbar(toolbar: HTMLElement): void {
