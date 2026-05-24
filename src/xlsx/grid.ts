@@ -20,6 +20,14 @@ export const POINTS_TO_PX = 4 / 3;
 export const DEFAULT_ROW_HEIGHT_PX = 20;
 export const ROW_HDR_COL_WIDTH_PX = 40;
 
+// Excel paints an empty grid canvas beyond the data. Pad the rendered range
+// with trailing empty rows/columns so a small sheet doesn't look chopped off
+// at its last value. Math.max keeps large sheets from being inflated.
+const MIN_GRID_COLS = 16;
+const MIN_GRID_ROWS = 50;
+const COL_PAD = 2;
+const ROW_PAD = 8;
+
 export interface GridContext {
   sheetWrapEl: HTMLElement;
   tableEl: HTMLTableElement;
@@ -56,6 +64,10 @@ export function renderSheetIntoGrid(
     if (m.right > lastCol) lastCol = m.right;
     if (m.bottom > lastRow) lastRow = m.bottom;
   }
+
+  // Pad with empty trailing rows/columns for a spreadsheet-like canvas.
+  lastCol = Math.max(lastCol + COL_PAD, MIN_GRID_COLS);
+  lastRow = Math.max(lastRow + ROW_PAD, MIN_GRID_ROWS);
 
   const skipMap = computeMergeSkipMap(merges);
   const mergeAnchor = new Map<string, MergeRect>();

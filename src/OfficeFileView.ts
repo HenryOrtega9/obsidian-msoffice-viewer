@@ -27,6 +27,7 @@ export abstract class OfficeFileView extends FileView {
   static pluginId = "obsidian-msoffice-viewer";
 
   protected renderEl: HTMLElement | null = null;
+  private scrollEl: HTMLElement | null = null;
   protected toolbarEl: HTMLElement | null = null;
   private zoomIndicatorEl: HTMLElement | null = null;
   private engineBadgeEl: HTMLElement | null = null;
@@ -53,7 +54,11 @@ export abstract class OfficeFileView extends FileView {
     this.toolbarEl = this.contentEl.createDiv({ cls: "docx-claude-toolbar" });
     this.buildToolbar(this.toolbarEl);
 
-    this.renderEl = this.contentEl.createDiv({ cls: "docx-claude-render" });
+    // Scroll on the outer wrapper, zoom on the inner renderEl. Applying CSS
+    // `zoom` directly to an overflow:auto element makes Chromium miscompute the
+    // scrollable height, clipping the bottom/right of content at zoom > 100%.
+    this.scrollEl = this.contentEl.createDiv({ cls: "docx-claude-scroll" });
+    this.renderEl = this.scrollEl.createDiv({ cls: "docx-claude-render" });
     this.applyZoom();
 
     this.registerDomEvent(this.contentEl, "wheel", this.onWheel, {
@@ -67,6 +72,7 @@ export abstract class OfficeFileView extends FileView {
     this.cancelActivePdfRender();
     this.contentEl.empty();
     this.renderEl = null;
+    this.scrollEl = null;
     this.toolbarEl = null;
     this.zoomIndicatorEl = null;
     this.engineBadgeEl = null;

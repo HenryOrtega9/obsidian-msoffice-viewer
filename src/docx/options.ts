@@ -8,7 +8,10 @@ export function buildDocxOptions(): Partial<Options> {
     className: "docx-claude",
     inWrapper: true,
     breakPages: true,
-    ignoreLastRenderedPageBreak: true,
+    // Honor Word's lastRenderedPageBreak hints so flowing documents paginate
+    // instead of collapsing into one tall page. docx-preview can't auto-break
+    // content height on its own; these hints are how it knows page boundaries.
+    ignoreLastRenderedPageBreak: false,
     experimental: true,
     // Object URLs can be flaky for fonts/images in Electron; base64 is reliable
     // for an offline desktop viewer.

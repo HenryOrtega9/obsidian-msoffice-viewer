@@ -57,9 +57,20 @@
   white-space: nowrap;
 }
 
-.docx-claude-render {
+/* Outer scroll container. Kept separate from the zoomed renderEl so CSS `zoom`
+   doesn't break scroll-height calculation (content stays reachable at >100%). */
+.docx-claude-scroll {
   flex: 1;
   overflow: auto;
+  background: var(--background-primary);
+}
+
+.docx-claude-render {
+  /* Grow with content (grid/pages) but never narrower than the viewport, so
+     zoom scales the content and the outer wrapper handles scrolling. */
+  width: fit-content;
+  min-width: 100%;
+  box-sizing: border-box;
   background: var(--background-primary);
   user-select: text;
   -webkit-user-select: text;
