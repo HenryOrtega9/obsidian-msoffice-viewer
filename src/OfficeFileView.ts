@@ -148,6 +148,8 @@ export abstract class OfficeFileView extends FileView {
     mkZoom("100%", "Reset zoom", () => this.resetZoom());
     this.updateZoomIndicator();
 
+    this.buildExtraToolbar(toolbar);
+
     if (loadElectronShell() && this.app.vault.adapter instanceof FileSystemAdapter) {
       const label = this.getExternalAppLabel();
       const openBtn = toolbar.createEl("button", {
@@ -161,6 +163,10 @@ export abstract class OfficeFileView extends FileView {
       });
     }
   }
+
+  // Hook for subclasses to add their own toolbar controls (e.g. the docx
+  // high-fidelity toggle). Called after the zoom buttons, before "Open in app".
+  protected buildExtraToolbar(_toolbar: HTMLElement): void {}
 
   private async openExternal(): Promise<void> {
     if (!this.file) return;

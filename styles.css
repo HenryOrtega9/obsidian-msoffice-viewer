@@ -50,6 +50,13 @@
   padding: 0.15rem 0.75rem;
 }
 
+.docx-claude-fidelity-toggle {
+  margin-left: 0.75rem;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
 .docx-claude-render {
   flex: 1;
   overflow: auto;
