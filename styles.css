@@ -174,6 +174,83 @@
   background: #ffffff;
 }
 
+/* Positioned wrapper sized to the table so overlay layers (images, charts)
+   and note popovers can be absolutely positioned over the full grid. */
+.docx-claude-xlsx-sheet-wrap {
+  position: relative;
+  width: max-content;
+}
+
+/* Overlay layer for embedded images and charts. Sits above the cell grid but
+   lets clicks fall through to cells, except on the images themselves. */
+.docx-claude-xlsx-image-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.docx-claude-xlsx-image {
+  position: absolute;
+  pointer-events: auto;
+  object-fit: contain;
+}
+
+.docx-claude-xlsx-image-placeholder {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  box-sizing: border-box;
+  background: #f4f4f4;
+  border: 1px dashed #bbbbbb;
+  color: #888888;
+  font-size: 10px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+/* Chart overlay: like the image layer but holders carry their own canvas. */
+.docx-claude-xlsx-chart-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.docx-claude-xlsx-chart-holder {
+  position: absolute;
+  pointer-events: auto;
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  box-sizing: border-box;
+  padding: 4px;
+}
+
+.docx-claude-xlsx-chart-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #f7f7f7;
+  border: 1px dashed #bbbbbb;
+  color: #777777;
+  font-size: 12px;
+  text-align: center;
+}
+
+.docx-claude-xlsx-chart-lo-btn {
+  padding: 0.2rem 0.6rem;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8em;
+}
+
 .docx-claude-xlsx-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -268,6 +345,73 @@
   background: var(--interactive-accent);
   color: var(--text-on-accent);
   border-color: var(--interactive-accent);
+}
+
+.docx-claude-xlsx-tab.is-hidden-sheet {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.docx-claude-xlsx-toggle-hidden {
+  margin-left: auto;
+  font-size: 0.78em;
+  color: var(--text-faint);
+}
+
+/* xlsx cell decorations */
+.docx-claude-xlsx-link {
+  color: #0563c1;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.docx-claude-xlsx-link:hover {
+  color: #0a44a8;
+}
+
+.docx-claude-xlsx-note-marker {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 8px 8px 0;
+  border-color: transparent #d62 transparent transparent;
+  cursor: pointer;
+}
+
+.docx-claude-xlsx-note-popover {
+  position: absolute;
+  z-index: 10;
+  min-width: 160px;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: #fffdc7;
+  color: #1f1f1f;
+  border: 1px solid #c9b970;
+  border-radius: 3px;
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+  white-space: pre-wrap;
+  pointer-events: auto;
+}
+
+.docx-claude-xlsx-cf-icon {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 0.9em;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+@keyframes docx-claude-xlsx-flash {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: inset 0 0 0 3px #ffc000; }
+}
+
+.docx-claude-xlsx-cell-flash {
+  animation: docx-claude-xlsx-flash 1.2s ease-in-out;
 }
 
 /* Create modal */

@@ -38,10 +38,6 @@ const context = await esbuild.context({
     "@lezer/common",
     "@lezer/highlight",
     "@lezer/lr",
-    // Optional peer of pptxviewjs; we don't render charts. Mark external so
-    // any accidental import lands as a clear runtime error instead of
-    // bundling hundreds of KB of dead code.
-    "chart.js",
     ...builtinModules,
   ],
   define: {
