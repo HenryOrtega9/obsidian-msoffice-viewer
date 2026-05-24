@@ -173,6 +173,95 @@
   font-style: italic;
 }
 
+/* Engine badge: which renderer produced the current view. */
+.docx-claude-engine-badge {
+  display: none;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.docx-claude-engine-badge.is-visible {
+  display: inline-block;
+}
+
+/* Native OOXML renderer: a fixed-size, absolutely-positioned slide stage. */
+.docx-claude-pptx-slide {
+  position: relative;
+  flex: none;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.docx-claude-pptx-shape {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  line-height: 1.2;
+}
+
+.docx-claude-pptx-p {
+  margin: 0;
+}
+
+.docx-claude-pptx-image {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.docx-claude-pptx-img {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  display: block;
+}
+
+.docx-claude-pptx-image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7em;
+  color: var(--text-faint);
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px dashed var(--background-modifier-border);
+}
+
+.docx-claude-pptx-table-holder {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.docx-claude-pptx-table {
+  width: 100%;
+  height: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.docx-claude-pptx-table td {
+  vertical-align: top;
+  overflow: hidden;
+  padding: 0.1em 0.25em;
+  box-sizing: border-box;
+}
+
+.docx-claude-pptx-chart-holder {
+  position: absolute;
+  box-sizing: border-box;
+  background: #ffffff;
+}
+
 /* xlsx ExcelJS grid — hardcoded to an Excel-light look so workbook contents
    stay readable regardless of Obsidian's theme. Cells with their own Excel
    fills still override `background-color` via inline style. */

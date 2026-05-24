@@ -29,6 +29,7 @@ export abstract class OfficeFileView extends FileView {
   protected renderEl: HTMLElement | null = null;
   protected toolbarEl: HTMLElement | null = null;
   private zoomIndicatorEl: HTMLElement | null = null;
+  private engineBadgeEl: HTMLElement | null = null;
   private zoom = DEFAULT_ZOOM;
   private activePdfRender: PdfRenderHandle | null = null;
 
@@ -68,6 +69,16 @@ export abstract class OfficeFileView extends FileView {
     this.renderEl = null;
     this.toolbarEl = null;
     this.zoomIndicatorEl = null;
+    this.engineBadgeEl = null;
+  }
+
+  // Show which renderer produced the current view. Subclasses with a multi-tier
+  // fallback chain call this so the user can tell high-fidelity output from a
+  // fallback. Empty text hides the badge.
+  protected setEngineLabel(text: string): void {
+    if (!this.engineBadgeEl) return;
+    this.engineBadgeEl.setText(text);
+    this.engineBadgeEl.toggleClass("is-visible", text.length > 0);
   }
 
   protected cancelActivePdfRender(): void {
@@ -147,6 +158,8 @@ export abstract class OfficeFileView extends FileView {
     mkZoom("+", "Zoom in", () => this.zoomIn());
     mkZoom("100%", "Reset zoom", () => this.resetZoom());
     this.updateZoomIndicator();
+
+    this.engineBadgeEl = toolbar.createDiv({ cls: "docx-claude-engine-badge" });
 
     this.buildExtraToolbar(toolbar);
 

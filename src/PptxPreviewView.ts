@@ -1,8 +1,10 @@
 import { Notice, TFile } from "obsidian";
 import { PPTXViewer } from "pptxviewjs";
 import JSZip from "jszip";
+import type { Chart } from "chart.js";
 import { OfficeFileView } from "./OfficeFileView";
 import { findSoffice } from "./officeToPdf";
+import { renderDeckNatively } from "./pptx/render";
 
 export const PPTX_CLAUDE_VIEW_TYPE = "pptx-claude-view";
 
@@ -10,6 +12,9 @@ const FALLBACK_SLIDE_WIDTH = 1920;
 const FALLBACK_SLIDE_HEIGHT = 1080;
 
 export class PptxPreviewView extends OfficeFileView {
+  private imageObjectUrls: string[] = [];
+  private chartInstances: Chart[] = [];
+
   getViewType(): string {
     return PPTX_CLAUDE_VIEW_TYPE;
   }
@@ -30,29 +35,89 @@ export class PptxPreviewView extends OfficeFileView {
     return "Open in PowerPoint";
   }
 
+  async onUnloadFile(file: TFile): Promise<void> {
+    this.resetState();
+    await super.onUnloadFile(file);
+  }
+
+  private resetState(): void {
+    this.revokeImageUrls();
+    this.destroyCharts();
+    this.setEngineLabel("");
+  }
+
+  private revokeImageUrls(): void {
+    for (const url of this.imageObjectUrls) URL.revokeObjectURL(url);
+    this.imageObjectUrls = [];
+  }
+
+  private destroyCharts(): void {
+    for (const chart of this.chartInstances) {
+      try { chart.destroy(); } catch { /* ignore */ }
+    }
+    this.chartInstances = [];
+  }
+
+  // Fallback chain: LibreOffice PDF (primary, high fidelity) -> native OOXML
+  // renderer -> pptxviewjs canvas -> raw-XML text card. Each tier reports its
+  // engine via the toolbar badge.
   protected async renderFile(file: TFile): Promise<void> {
     if (!this.renderEl) return;
+    this.resetState();
     this.renderEl.empty();
 
     const sofficeBin = await findSoffice();
     if (sofficeBin) {
       try {
         await this.renderViaLibreOfficePdf(file, sofficeBin, "pptx");
+        this.setEngineLabel("LibreOffice");
         return;
       } catch (e) {
-        console.error("LibreOffice render failed; falling back to pptxviewjs:", e);
-        new Notice("LibreOffice rendering failed; using fallback renderer.");
+        console.error("LibreOffice render failed; trying native renderer:", e);
       }
-    } else {
-      new Notice(
-        "LibreOffice not found; rendering with the JS fallback (lower fidelity).",
-        4000,
-      );
     }
 
     if (this.file !== file || !this.renderEl) return;
+    this.resetState();
     this.renderEl.empty();
+    try {
+      await this.renderViaNative(file);
+      if (this.file !== file) return;
+      this.setEngineLabel("Native");
+      return;
+    } catch (e) {
+      console.error("Native PPTX render failed; falling back to pptxviewjs:", e);
+    }
+
+    if (this.file !== file || !this.renderEl) return;
+    this.resetState();
+    this.renderEl.empty();
+    if (!sofficeBin) {
+      new Notice(
+        "LibreOffice not found; rendering with the built-in engine (lower fidelity).",
+        4000,
+      );
+    }
+    this.setEngineLabel("Built-in");
     await this.renderViaPptxViewJS(file);
+  }
+
+  private async renderViaNative(file: TFile): Promise<void> {
+    if (!this.renderEl) return;
+    const buf = await this.app.vault.readBinary(file);
+    if (this.file !== file || !this.renderEl) return;
+    const result = await renderDeckNatively(buf, this.renderEl, {
+      isStale: () => this.file !== file,
+    });
+    if (this.file !== file) {
+      for (const url of result.objectUrls) URL.revokeObjectURL(url);
+      for (const chart of result.charts) {
+        try { chart.destroy(); } catch { /* ignore */ }
+      }
+      return;
+    }
+    this.imageObjectUrls = result.objectUrls;
+    this.chartInstances = result.charts;
   }
 
   private async renderViaPptxViewJS(file: TFile): Promise<void> {

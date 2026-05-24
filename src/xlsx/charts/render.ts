@@ -27,13 +27,13 @@ import { ChartKind, ChartPlacement, ChartSeries, ChartSpec } from "./types";
 
 const MAX_CHARTS_PER_SHEET = 10;
 
-const PALETTE = [
+export const PALETTE = [
   "#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47",
   "#264478", "#9E480E", "#636363", "#997300", "#255E91", "#43682B",
 ];
 
 let registered = false;
-function ensureRegistered(): void {
+export function ensureRegistered(): void {
   if (registered) return;
   Chart.register(
     BarController, LineController, PieController, DoughnutController,
@@ -77,25 +77,37 @@ export function renderSheetCharts(
     holder.style.width = `${box.width}px`;
     holder.style.height = `${box.height}px`;
 
-    const spec = placement.spec;
-    const config = spec.kind === "unsupported" ? null : buildConfig(spec);
-    if (!config) {
-      renderPlaceholder(holder, spec, opts);
-      continue;
-    }
-
-    try {
-      const canvas = holder.createEl("canvas");
-      const chart = new Chart(canvas, config);
-      charts.push(chart);
-    } catch (e) {
-      warn("chart-render", e, { kind: spec.kind });
-      holder.empty();
-      renderPlaceholder(holder, spec, opts);
-    }
+    const chart = renderChartIntoHolder(holder, placement.spec, opts);
+    if (chart) charts.push(chart);
   }
 
   return charts;
+}
+
+// Placement-agnostic core: register controllers, build the config, instantiate
+// Chart.js into `holder`, falling back to a placeholder on unsupported types or
+// errors. Shared with the pptx renderer so charts behave identically and no
+// second copy of buildConfig / Chart.js registration ships in the bundle.
+export function renderChartIntoHolder(
+  holder: HTMLElement,
+  spec: ChartSpec,
+  opts: RenderChartsOpts = {},
+): Chart | null {
+  ensureRegistered();
+  const config = spec.kind === "unsupported" ? null : buildConfig(spec);
+  if (!config) {
+    renderPlaceholder(holder, spec, opts);
+    return null;
+  }
+  try {
+    const canvas = holder.createEl("canvas");
+    return new Chart(canvas, config);
+  } catch (e) {
+    warn("chart-render", e, { kind: spec.kind });
+    holder.empty();
+    renderPlaceholder(holder, spec, opts);
+    return null;
+  }
 }
 
 function renderPlaceholder(holder: HTMLElement, spec: ChartSpec, opts: RenderChartsOpts): void {
@@ -114,7 +126,7 @@ function renderPlaceholder(holder: HTMLElement, spec: ChartSpec, opts: RenderCha
   }
 }
 
-function buildConfig(spec: ChartSpec): ChartConfiguration | null {
+export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
   const cjsType = mapType(spec.kind);
   if (!cjsType) return null;
 
