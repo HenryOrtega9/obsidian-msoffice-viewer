@@ -4,7 +4,6 @@ import { OfficeFileView } from "./OfficeFileView";
 import { findSoffice } from "./officeToPdf";
 import { buildDocxOptions } from "./docx/options";
 import { isRenderEmpty } from "./docx/emptyRender";
-import { detectComplexFeatures } from "./docx/featureDetect";
 import { warn } from "./docx/warn";
 
 export const DOCX_CLAUDE_VIEW_TYPE = "docx-claude-view";
@@ -51,12 +50,10 @@ export class DocxPreviewView extends OfficeFileView {
     const buf = await this.app.vault.readBinary(file);
     if (this.file !== file || !this.renderEl) return;
 
-    const complexity = await detectComplexFeatures(buf);
-    if (this.file !== file || !this.renderEl) return;
-
-    // Auto-route docs with charts/SmartArt/OLE to PDF; a manual override wins.
-    const auto: RenderMode = complexity.forcePdf ? "pdf" : "html";
-    const mode = this.userForcedMode ?? auto;
+    // LibreOffice → PDF is the high-fidelity default: it renders through the
+    // real Office layout engine. docx-preview is the fallback when LibreOffice
+    // is unavailable or fails, and stays reachable via the toolbar toggle.
+    const mode = this.userForcedMode ?? "pdf";
 
     if (mode === "pdf") {
       if (await this.tryRenderPdf(file)) return;
@@ -67,8 +64,7 @@ export class DocxPreviewView extends OfficeFileView {
       return;
     }
 
-    // Text-centric default: docx-preview first (keeps selection/reflow/theming),
-    // PDF only as a rescue when it throws or renders empty.
+    // Manual override to the selectable text renderer; PDF rescues if it fails.
     if (await this.tryRenderHtml(buf)) return;
     if (this.file !== file || !this.renderEl) return;
     this.renderEl.empty();

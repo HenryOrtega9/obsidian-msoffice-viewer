@@ -5,6 +5,7 @@ import {
   ensurePdfjsWorker,
   pluginCacheDir,
   renderPdfPagesIntoStage,
+  type PdfReadyInfo,
   type PdfRenderHandle,
 } from "./officeToPdf";
 
@@ -134,16 +135,20 @@ export abstract class OfficeFileView extends FileView {
       { isStale: () => this.file !== file },
     );
     this.activePdfRender = handle;
+    let info: PdfReadyInfo;
     try {
-      const pages = await handle.pages;
-      if (this.activePdfRender === handle) this.activePdfRender = null;
-      if (pages.length === 0 || pages.every((p) => p.failed)) {
-        throw new Error("LibreOffice PDF produced no renderable pages.");
-      }
+      info = await handle.ready;
     } catch (e) {
-      if (this.activePdfRender === handle) this.activePdfRender = null;
+      if (this.activePdfRender === handle) this.cancelActivePdfRender();
       throw e;
     }
+    if (info.numPages === 0 || info.firstPageFailed) {
+      if (this.activePdfRender === handle) this.cancelActivePdfRender();
+      throw new Error("LibreOffice PDF produced no renderable pages.");
+    }
+    // Leave the handle active: pages 2..N render lazily as they scroll into
+    // view; teardown happens on the next cancelActivePdfRender (file
+    // switch/unload), which disconnects the observer and destroys the doc.
   }
 
   private buildToolbar(toolbar: HTMLElement): void {

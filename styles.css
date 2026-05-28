@@ -124,6 +124,10 @@
   max-width: 1280px;
   display: flex;
   justify-content: center;
+  /* Faint page frame so lazily-rendered pages occupy a visible page-shaped
+     block before their canvas renders in. A rendered canvas fully covers it. */
+  background: var(--background-secondary);
+  border-radius: 4px;
 }
 
 .docx-claude-pdf-canvas {

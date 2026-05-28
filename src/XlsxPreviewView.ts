@@ -94,29 +94,35 @@ export class XlsxPreviewView extends OfficeFileView {
     this.resetState();
     this.renderEl.empty();
 
-    if (file.extension === "xlsx") {
-      try {
-        await this.renderViaExcelJsGrid(file);
-        return;
-      } catch (e) {
-        console.error("ExcelJS grid render failed; falling back to LibreOffice PDF:", e);
-        new Notice("Grid rendering failed; using PDF fallback.");
-        if (this.file !== file || !this.renderEl) return;
-        // resetState before empty() so a half-built tabsEl (which lives
-        // outside renderEl) doesn't ghost beneath the PDF fallback.
-        this.resetState();
-        this.renderEl.empty();
-      }
-    }
-
-    // .xls (legacy binary) or ExcelJS fallback path
+    // LibreOffice → PDF is the high-fidelity default for every spreadsheet type
+    // (it renders through the real Excel-compatible layout engine). The ExcelJS
+    // grid is the fallback when LibreOffice is unavailable or fails, and only
+    // handles .xlsx (not the legacy .xls binary format).
     const sofficeBin = await findSoffice();
+    if (this.file !== file || !this.renderEl) return;
     if (sofficeBin) {
       try {
         await this.renderViaLibreOfficePdf(file, sofficeBin, file.extension);
         return;
       } catch (e) {
-        console.error("LibreOffice render failed:", e);
+        console.error("LibreOffice render failed; falling back to grid:", e);
+        if (this.file !== file || !this.renderEl) return;
+        // resetState before empty() so a half-built tabsEl (which lives
+        // outside renderEl) doesn't ghost beneath the fallback.
+        this.resetState();
+        this.renderEl.empty();
+      }
+    }
+
+    if (file.extension === "xlsx") {
+      try {
+        await this.renderViaExcelJsGrid(file);
+        return;
+      } catch (e) {
+        console.error("ExcelJS grid render failed:", e);
+        if (this.file !== file || !this.renderEl) return;
+        this.resetState();
+        this.renderEl.empty();
       }
     }
 
