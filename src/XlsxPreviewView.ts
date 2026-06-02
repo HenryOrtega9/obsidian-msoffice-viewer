@@ -22,6 +22,8 @@ interface SheetEntry {
   hidden: boolean;
 }
 
+type RenderMode = "pdf" | "grid";
+
 export class XlsxPreviewView extends OfficeFileView {
   private workbook: ExcelJS.Workbook | null = null;
   private sheets: SheetEntry[] = [];
@@ -34,6 +36,18 @@ export class XlsxPreviewView extends OfficeFileView {
   private imageObjectUrls: string[] = [];
   private chartMap: Map<string, ChartPlacement[]> = new Map();
   private chartInstances: Chart[] = [];
+  // PDF (high fidelity) vs the interactive ExcelJS grid (sheet tabs, links,
+  // selection). userForcedMode is a sticky manual override (null = auto-route),
+  // reset on file switch and preserved across toggle-driven re-renders.
+  private renderMode: RenderMode = "pdf";
+  private userForcedMode: RenderMode | null = null;
+  private toggleBtn: HTMLButtonElement | null = null;
+  private sofficeAvailable = false;
+
+  async onLoadFile(file: TFile): Promise<void> {
+    this.userForcedMode = null;
+    await super.onLoadFile(file);
+  }
 
   getViewType(): string {
     return XLSX_CLAUDE_VIEW_TYPE;
@@ -96,45 +110,129 @@ export class XlsxPreviewView extends OfficeFileView {
 
     // LibreOffice → PDF is the high-fidelity default for every spreadsheet type
     // (it renders through the real Excel-compatible layout engine). The ExcelJS
-    // grid is the fallback when LibreOffice is unavailable or fails, and only
-    // handles .xlsx (not the legacy .xls binary format).
-    const sofficeBin = await findSoffice();
+    // grid (sheet tabs, hyperlinks, text selection) is the fallback when
+    // LibreOffice is unavailable or fails, and is reachable via the toolbar
+    // toggle. The grid only handles .xlsx, not the legacy .xls binary format.
+    const canGrid = file.extension === "xlsx";
+    const mode: RenderMode = this.userForcedMode ?? "pdf";
+
+    if (mode === "grid" && canGrid) {
+      if (await this.tryRenderGrid(file)) return;
+      if (this.file !== file || !this.renderEl) return;
+      this.resetState();
+      this.renderEl.empty();
+      if (await this.tryRenderPdf(file)) return;
+      this.showError(file);
+      return;
+    }
+
+    if (await this.tryRenderPdf(file)) return;
     if (this.file !== file || !this.renderEl) return;
-    if (sofficeBin) {
-      try {
-        await this.renderViaLibreOfficePdf(file, sofficeBin, file.extension);
+    // resetState before empty() so a half-built tabsEl (which lives outside
+    // renderEl) doesn't ghost beneath the fallback.
+    this.resetState();
+    this.renderEl.empty();
+    if (canGrid && (await this.tryRenderGrid(file))) return;
+    this.showError(file);
+  }
+
+  // Render via the shared LibreOffice -> PDF -> PDF.js pipeline. Returns false
+  // when LibreOffice is missing or the conversion fails.
+  private async tryRenderPdf(file: TFile): Promise<boolean> {
+    if (!this.renderEl) return false;
+    const sofficeBin = await findSoffice();
+    if (this.file !== file || !this.renderEl) return false;
+    this.sofficeAvailable = sofficeBin != null;
+    if (!sofficeBin) return false;
+    this.resetState();
+    this.renderEl.empty();
+    try {
+      await this.renderViaLibreOfficePdf(file, sofficeBin, file.extension);
+      this.renderMode = "pdf";
+      this.updateToggleLabel();
+      return true;
+    } catch (e) {
+      console.error("LibreOffice render failed:", e);
+      return false;
+    }
+  }
+
+  // Render via the interactive ExcelJS grid. Returns false on parse/render
+  // failure so the caller can fall back to PDF.
+  private async tryRenderGrid(file: TFile): Promise<boolean> {
+    if (!this.renderEl) return false;
+    try {
+      await this.renderViaExcelJsGrid(file);
+      this.renderMode = "grid";
+      this.updateToggleLabel();
+      return true;
+    } catch (e) {
+      console.error("ExcelJS grid render failed:", e);
+      return false;
+    }
+  }
+
+  private showError(file: TFile): void {
+    if (!this.renderEl) return;
+    this.renderEl.empty();
+    this.renderEl
+      .createDiv({ cls: "docx-claude-pdf-error" })
+      .setText(
+        file.extension === "xls"
+          ? "Couldn't render this .xls. Install LibreOffice or convert to .xlsx."
+          : "Couldn't render this workbook. See console for details.",
+      );
+  }
+
+  protected buildExtraToolbar(toolbar: HTMLElement): void {
+    this.toggleBtn = toolbar.createEl("button", {
+      cls: "docx-claude-zoom-btn docx-claude-fidelity-toggle",
+      text: this.toggleLabel(),
+      attr: { title: this.toggleTitle(), "aria-label": this.toggleTitle() },
+    });
+    this.toggleBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      void this.onToggleClick();
+    });
+    this.updateToggleLabel();
+  }
+
+  private toggleLabel(): string {
+    return this.renderMode === "pdf" ? "Interactive grid" : "High fidelity (PDF)";
+  }
+
+  private toggleTitle(): string {
+    return this.renderMode === "pdf"
+      ? "Switch to the interactive grid (sheet tabs, hyperlinks, text selection)"
+      : "Re-render this workbook via LibreOffice for higher fidelity";
+  }
+
+  private updateToggleLabel(): void {
+    if (!this.toggleBtn) return;
+    // The grid handles .xlsx only; for .xls there is no alternative to PDF, so
+    // hide the toggle entirely.
+    this.toggleBtn.style.display = this.file?.extension === "xlsx" ? "" : "none";
+    this.toggleBtn.setText(this.toggleLabel());
+    this.toggleBtn.setAttribute("title", this.toggleTitle());
+    this.toggleBtn.setAttribute("aria-label", this.toggleTitle());
+  }
+
+  private async onToggleClick(): Promise<void> {
+    if (!this.file) return;
+    const target: RenderMode = this.renderMode === "pdf" ? "grid" : "pdf";
+    if (target === "grid" && this.file.extension !== "xlsx") {
+      new Notice("The interactive grid supports .xlsx only. Use Open in Excel for .xls.", 6000);
+      return;
+    }
+    if (target === "pdf") {
+      const soffice = await findSoffice();
+      if (!soffice) {
+        new Notice("LibreOffice not found. Install it for high-fidelity PDF rendering.", 6000);
         return;
-      } catch (e) {
-        console.error("LibreOffice render failed; falling back to grid:", e);
-        if (this.file !== file || !this.renderEl) return;
-        // resetState before empty() so a half-built tabsEl (which lives
-        // outside renderEl) doesn't ghost beneath the fallback.
-        this.resetState();
-        this.renderEl.empty();
       }
     }
-
-    if (file.extension === "xlsx") {
-      try {
-        await this.renderViaExcelJsGrid(file);
-        return;
-      } catch (e) {
-        console.error("ExcelJS grid render failed:", e);
-        if (this.file !== file || !this.renderEl) return;
-        this.resetState();
-        this.renderEl.empty();
-      }
-    }
-
-    if (this.renderEl) {
-      this.renderEl
-        .createDiv({ cls: "docx-claude-pdf-error" })
-        .setText(
-          file.extension === "xls"
-            ? "Couldn't render this .xls. Install LibreOffice or convert to .xlsx."
-            : "Couldn't render this workbook. See console for details.",
-        );
-    }
+    this.userForcedMode = target;
+    await this.renderFile(this.file);
   }
 
   private async renderViaExcelJsGrid(file: TFile): Promise<void> {
