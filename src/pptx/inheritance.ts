@@ -51,12 +51,36 @@ function findPhShape(doc: Document | null, ph: Ph): Element | null {
   }) ?? null;
 }
 
+export type BulletDef =
+  | { kind: "none" }
+  | { kind: "char"; char: string; font: string | null }
+  | { kind: "autonum"; type: string };
+
 export interface RunStyleDefaults {
   sizePt?: number;
   colorCss?: string | null;
   bold?: boolean;
   fontFamily?: string | null;
   align?: string | null;
+  marL?: number; // paragraph left margin (EMU)
+  indent?: number; // first-line indent (EMU, negative = hanging)
+  bullet?: BulletDef;
+}
+
+// Read the bullet choice (buNone / buChar / buAutoNum) from a pPr or a master
+// lvlNpPr element. Returns undefined when the element specifies no bullet
+// choice, so callers can fall back to the inherited list style.
+export function parseBulletFrom(el: Element | null | undefined): BulletDef | undefined {
+  if (!el) return undefined;
+  if (directChild(el, NS.a, "buNone")) return { kind: "none" };
+  const buChar = directChild(el, NS.a, "buChar");
+  if (buChar) {
+    const font = directChild(el, NS.a, "buFont")?.getAttribute("typeface") ?? null;
+    return { kind: "char", char: buChar.getAttribute("char") ?? "•", font };
+  }
+  const buAuto = directChild(el, NS.a, "buAutoNum");
+  if (buAuto) return { kind: "autonum", type: buAuto.getAttribute("type") ?? "arabicPeriod" };
+  return undefined;
 }
 
 // Build a per-level resolver of default run styling from the master's
@@ -74,6 +98,11 @@ export function buildPhDefaults(
     const lvlPr = nthLvlPr(styleEl, level);
     if (!lvlPr) return {};
     const out: RunStyleDefaults = { align: lvlPr.getAttribute("algn") };
+    const marL = lvlPr.getAttribute("marL");
+    if (marL) out.marL = parseInt(marL, 10);
+    const indent = lvlPr.getAttribute("indent");
+    if (indent) out.indent = parseInt(indent, 10);
+    out.bullet = parseBulletFrom(lvlPr);
     const defRPr = directChild(lvlPr, NS.a, "defRPr");
     if (defRPr) {
       const sz = defRPr.getAttribute("sz");

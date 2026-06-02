@@ -128,8 +128,38 @@ function renderSp(
     const defaultsFor = ph
       ? buildPhDefaults(ph.type, slideRef.masterDoc, ctx.theme, ctx.clrMap)
       : undefined;
-    renderParagraphsInto(parseTxBody(txBody, ctx, defaultsFor), el, frame.scaleX);
+    const bodyPr = directChild(txBody, NS.a, "bodyPr");
+    applyBodyInsets(el, bodyPr, frame.scaleX);
+    const fontScale = readFontScale(bodyPr);
+    renderParagraphsInto(parseTxBody(txBody, ctx, defaultsFor), el, frame.scaleX, fontScale);
   }
+}
+
+// normAutofit fontScale is the shrink factor PowerPoint baked in to fit text.
+// Honor it so autofit titles/bodies match; absent or empty means full size.
+function readFontScale(bodyPr: Element | null): number {
+  if (!bodyPr) return 1;
+  const af = directChild(bodyPr, NS.a, "normAutofit");
+  const fs = af?.getAttribute("fontScale");
+  if (!fs) return 1;
+  const n = parseInt(fs, 10);
+  return Number.isFinite(n) && n > 0 ? n / 100000 : 1;
+}
+
+// Apply text-frame insets as padding so text sits inside the box like Excel/PPT.
+// Defaults are the OOXML defaults (0.1" left/right, 0.05" top/bottom). box-sizing
+// keeps the padded text within the shape's measured box.
+function applyBodyInsets(el: HTMLElement, bodyPr: Element | null, scale: number): void {
+  const ins = (attr: string, def: number): number => {
+    const v = bodyPr?.getAttribute(attr);
+    const emu = v != null ? parseInt(v, 10) : def;
+    return Number.isFinite(emu) ? Math.max(0, emu) * scale : 0;
+  };
+  el.style.boxSizing = "border-box";
+  el.style.paddingLeft = `${ins("lIns", 91440)}px`;
+  el.style.paddingRight = `${ins("rIns", 91440)}px`;
+  el.style.paddingTop = `${ins("tIns", 45720)}px`;
+  el.style.paddingBottom = `${ins("bIns", 45720)}px`;
 }
 
 async function renderPic(pic: Element, stage: HTMLElement, ctx: RenderCtx, frame: Frame): Promise<void> {
