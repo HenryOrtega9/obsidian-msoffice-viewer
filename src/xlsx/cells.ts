@@ -36,6 +36,8 @@ export function renderCellInto(
   const style = cellInlineStyle(cell, opts.theme);
   if (style) td.setAttribute("style", style);
 
+  applyCellRotation(cell, td);
+
   const link = getCellHyperlink(cell, opts.sheetHyperlinks);
   if (link) wrapInHyperlink(td, link, { onInternal: opts.onInternalLink });
 
@@ -211,14 +213,9 @@ export function cellInlineStyle(cell: ExcelJS.Cell, theme?: readonly string[]): 
   if (fmtColor) parts.push(`color: ${fmtColor}`);
 
   const fill = cell.fill as ExcelJS.Fill | undefined;
-  if (fill && fill.type === "pattern") {
-    // For solid patterns fgColor is the fill. For non-solid patterns we use
-    // fgColor as the primary color (good enough for a viewer) and fall back
-    // to bgColor if fgColor is missing.
-    const fgRef = (fill as { fgColor?: ExcelColorRef }).fgColor;
-    const bgRef = (fill as { bgColor?: ExcelColorRef }).bgColor;
-    const css = resolveExcelColor(fgRef, theme) ?? resolveExcelColor(bgRef, theme);
-    if (css) parts.push(`background-color: ${css}`);
+  if (fill) {
+    const fillCss = fillToCss(fill, theme);
+    if (fillCss) parts.push(fillCss);
   }
 
   const border = cell.border as Partial<ExcelJS.Borders> | undefined;
@@ -248,6 +245,125 @@ export function cellInlineStyle(cell: ExcelJS.Cell, theme?: readonly string[]): 
 
 function quoteFont(name: string): string {
   return /^[A-Za-z0-9_-]+$/.test(name) ? name : `"${name.replace(/"/g, "")}"`;
+}
+
+// Approximate fraction of a cell covered by the foreground color for each
+// non-solid OOXML fill pattern. Used to blend fg over bg so a sparse pattern
+// (e.g. gray125) reads as a light tint instead of a saturated solid.
+const PATTERN_DENSITY: Record<string, number> = {
+  gray0625: 0.0625,
+  gray125: 0.125,
+  lightGray: 0.25,
+  lightHorizontal: 0.25,
+  lightVertical: 0.25,
+  lightDown: 0.25,
+  lightUp: 0.25,
+  lightGrid: 0.4,
+  lightTrellis: 0.4,
+  mediumGray: 0.5,
+  darkHorizontal: 0.5,
+  darkVertical: 0.5,
+  darkDown: 0.5,
+  darkUp: 0.5,
+  darkGray: 0.75,
+  darkGrid: 0.75,
+  darkTrellis: 0.85,
+};
+
+// Parse "#rgb"/"#rrggbb" to [r,g,b]; returns null for non-hex inputs (e.g.
+// rgb()/named colors) so callers can fall back gracefully.
+function parseHex(css: string): [number, number, number] | null {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(css.trim());
+  if (!m) return null;
+  let h = m[1];
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+// Linear blend of `over` onto `base` by fraction t (0..1).
+function blendHex(base: string, over: string, t: number): string | null {
+  const a = parseHex(base);
+  const b = parseHex(over);
+  if (!a || !b) return null;
+  const mix = (i: number) => Math.round(a[i] * (1 - t) + b[i] * t);
+  const hx = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${hx(mix(0))}${hx(mix(1))}${hx(mix(2))}`;
+}
+
+// Turn an ExcelJS fill into a CSS background declaration. Solid patterns paint
+// fgColor; non-solid patterns blend fg over bg by approximate density; gradient
+// fills become a linear/radial CSS gradient from the stop list.
+function fillToCss(fill: ExcelJS.Fill, theme?: readonly string[]): string | null {
+  if (fill.type === "pattern") {
+    const pat = (fill as { pattern?: string }).pattern;
+    if (!pat || pat === "none") return null;
+    const fgRef = (fill as { fgColor?: ExcelColorRef }).fgColor;
+    const bgRef = (fill as { bgColor?: ExcelColorRef }).bgColor;
+    const fg = resolveExcelColor(fgRef, theme);
+    const bg = resolveExcelColor(bgRef, theme);
+    if (pat === "solid") {
+      const css = fg ?? bg;
+      return css ? `background-color: ${css}` : null;
+    }
+    const density = PATTERN_DENSITY[pat] ?? 0.5;
+    const blended = blendHex(bg ?? "#ffffff", fg ?? "#000000", density);
+    const css = blended ?? fg ?? bg;
+    return css ? `background-color: ${css}` : null;
+  }
+  if (fill.type === "gradient") {
+    const g = fill as {
+      gradient?: string;
+      degree?: number;
+      stops?: { position?: number; color?: ExcelColorRef }[];
+    };
+    const stops = (g.stops ?? [])
+      .map((s) => {
+        const c = resolveExcelColor(s.color, theme);
+        if (!c) return null;
+        return `${c} ${Math.round((s.position ?? 0) * 100)}%`;
+      })
+      .filter((s): s is string => s != null);
+    if (stops.length < 2) {
+      return stops.length === 1
+        ? `background-color: ${stops[0].split(" ")[0]}`
+        : null;
+    }
+    if (g.gradient === "path") {
+      return `background-image: radial-gradient(${stops.join(", ")})`;
+    }
+    const deg = typeof g.degree === "number" ? g.degree : 90;
+    return `background-image: linear-gradient(${deg}deg, ${stops.join(", ")})`;
+  }
+  return null;
+}
+
+// Excel text rotation -> CSS. Positive Excel rotation is counterclockwise (CSS
+// rotate() is clockwise, so the sign flips); 255/"vertical" is stacked upright
+// text. Applied to a wrapper span so the cell box keeps laying out normally.
+function cellRotationStyle(cell: ExcelJS.Cell): string | null {
+  const align = cell.alignment as Partial<ExcelJS.Alignment> | undefined;
+  if (!align) return null;
+  const rot = align.textRotation as number | "vertical" | undefined;
+  if (rot == null) return null;
+  if (rot === "vertical" || rot === 255) {
+    return "writing-mode: vertical-rl; text-orientation: upright; white-space: nowrap";
+  }
+  if (typeof rot === "number" && rot !== 0) {
+    return `display: inline-block; white-space: nowrap; transform: rotate(${-rot}deg)`;
+  }
+  return null;
+}
+
+// Wrap a rotated cell's content in a span carrying the transform, leaving the
+// <td> itself unrotated so column widths and note markers stay put.
+function applyCellRotation(cell: ExcelJS.Cell, td: HTMLTableCellElement): void {
+  const rotStyle = cellRotationStyle(cell);
+  if (!rotStyle) return;
+  const kids = Array.from(td.childNodes);
+  if (!kids.length) return;
+  const inner = td.createSpan();
+  inner.setAttribute("style", rotStyle);
+  for (const k of kids) inner.appendChild(k);
 }
 
 // OOXML border style -> CSS {width, style}. Excel's automatic (unspecified)

@@ -6,3 +6,6 @@ history/
 tmp/
 .DS_Store
 *.log
+
+# local render-verification harness (jsdom + headless Chrome)
+verify/
