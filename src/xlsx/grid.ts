@@ -12,13 +12,35 @@ import {
 } from "./hyperlinks";
 
 // Excel column width units are "characters of the default font, rendered with
-// the maximum digit width." 7px per char is a reasonable approximation for
-// Calibri 11 on a typical Mac.
-export const COL_WIDTH_PX_PER_CH = 7;
+// the maximum digit width" (MDW). For Calibri 11 at 96 DPI, MDW = 7px. exceljs
+// col.width is the stored XLSX width attribute in MDW units (padding-inclusive),
+// not the 8.43 UI character value. DEFAULT_COL_WIDTH_CH is kept only as a
+// documented reference to that UI value.
+export const MDW = 7;
 export const DEFAULT_COL_WIDTH_CH = 8.43;
 export const POINTS_TO_PX = 4 / 3;
-export const DEFAULT_ROW_HEIGHT_PX = 20;
+// Default column width in pixels when no width is stored (stored 9.140625 maps
+// to 64px via storedWidthToPx; see the assertion below).
+const DEFAULT_COL_WIDTH_PX = 64;
+// 15pt is Excel's default row height for Calibri 11; 15 * 4/3 = 20px at 96 DPI.
+export const DEFAULT_ROW_HEIGHT_PX = Math.round(15 * POINTS_TO_PX);
 export const ROW_HDR_COL_WIDTH_PX = 40;
+
+// ECMA-376 stored-width to pixels. The Trunc(128 / MDW) term self-includes the
+// per-column padding, so do NOT add a separate +5. Worked example:
+// 9.140625 -> Trunc((256*9.140625 + Trunc(128/7)) / 256 * 7) = Trunc(64.4766) = 64.
+function storedWidthToPx(width: number): number {
+  return Math.trunc(((256 * width + Math.trunc(128 / MDW)) / 256) * MDW);
+}
+
+// Unit assertion documenting the canonical default-column mapping. If the
+// formula ever drifts, this throws at module load instead of silently
+// misrendering every grid.
+if (storedWidthToPx(9.140625) !== DEFAULT_COL_WIDTH_PX) {
+  throw new Error(
+    `storedWidthToPx(9.140625) = ${storedWidthToPx(9.140625)}, expected ${DEFAULT_COL_WIDTH_PX}`,
+  );
+}
 
 // Excel paints an empty grid canvas beyond the data. Pad the rendered range
 // with trailing empty rows/columns so a small sheet doesn't look chopped off
@@ -60,6 +82,14 @@ export function renderSheetIntoGrid(
   // spans never overrun the colgroup).
   let lastCol = Math.max(1, ws.actualColumnCount || ws.columnCount || 1);
   let lastRow = Math.max(1, ws.actualRowCount || ws.rowCount || 1);
+  // ws.dimensions reflects the stored used range; actualRowCount/actualColumnCount
+  // count non-empty rows/cols and can under-report trailing format-only or
+  // merge-only cells, so fold the stored bounds in too.
+  const dims = ws.dimensions as { bottom?: number; right?: number } | undefined;
+  if (dims) {
+    if (typeof dims.right === "number" && dims.right > lastCol) lastCol = dims.right;
+    if (typeof dims.bottom === "number" && dims.bottom > lastRow) lastRow = dims.bottom;
+  }
   for (const m of merges) {
     if (m.right > lastCol) lastCol = m.right;
     if (m.bottom > lastRow) lastRow = m.bottom;
@@ -85,11 +115,21 @@ export function renderSheetIntoGrid(
   const colgroup = table.createEl("colgroup");
   colgroup.createEl("col", { cls: "docx-claude-xlsx-rowhdr-col" });
 
+  // Sheet default column width (stored attribute) when present, else the
+  // canonical 64px default.
+  const sheetDefaultColWidth = (
+    ws.properties as { defaultColWidth?: number } | undefined
+  )?.defaultColWidth;
+  const defaultColPx =
+    typeof sheetDefaultColWidth === "number"
+      ? storedWidthToPx(sheetDefaultColWidth)
+      : DEFAULT_COL_WIDTH_PX;
+
   const cumulativeColPx: number[] = [0]; // cumulativeColPx[0] = 0 (offset before col 1)
   for (let c = 1; c <= lastCol; c++) {
     const col = ws.getColumn(c);
-    const widthCh = col.width ?? DEFAULT_COL_WIDTH_CH;
-    const widthPx = Math.round(widthCh * COL_WIDTH_PX_PER_CH);
+    const widthPx =
+      typeof col.width === "number" ? storedWidthToPx(col.width) : defaultColPx;
     const colEl = colgroup.createEl("col");
     colEl.setAttribute("style", `width: ${widthPx}px`);
     cumulativeColPx.push(cumulativeColPx[c - 1] + widthPx);
@@ -105,17 +145,33 @@ export function renderSheetIntoGrid(
     });
   }
 
+  // Sheet default row height (points) when present, else the 15pt-derived
+  // default. defaultRowHeight is stored in points like row.height.
+  const sheetDefaultRowHeight = (
+    ws.properties as { defaultRowHeight?: number } | undefined
+  )?.defaultRowHeight;
+  const defaultRowPx =
+    typeof sheetDefaultRowHeight === "number"
+      ? Math.round(sheetDefaultRowHeight * POINTS_TO_PX)
+      : DEFAULT_ROW_HEIGHT_PX;
+
   const tbody = table.createEl("tbody");
   const cumulativeRowPx: number[] = [0];
   for (let r = 1; r <= lastRow; r++) {
     const row = ws.getRow(r);
     const tr = tbody.createEl("tr");
-    const heightPx = row.height
-      ? Math.round(row.height * POINTS_TO_PX)
-      : DEFAULT_ROW_HEIGHT_PX;
-    if (row.height) {
-      tr.setAttribute("style", `height: ${heightPx}px`);
+    // Hidden or explicit 0-height rows collapse to 0px; an unset height uses the
+    // sheet default; otherwise convert the stored points. Always set the tr
+    // inline height so DOM rows match cumulativeRowPx for the overlay layer.
+    let heightPx: number;
+    if (row.hidden || row.height === 0) {
+      heightPx = 0;
+    } else if (row.height == null) {
+      heightPx = defaultRowPx;
+    } else {
+      heightPx = Math.round(row.height * POINTS_TO_PX);
     }
+    tr.setAttribute("style", `height: ${heightPx}px`);
     cumulativeRowPx.push(cumulativeRowPx[r - 1] + heightPx);
 
     const rowHdr = tr.createEl("th", {

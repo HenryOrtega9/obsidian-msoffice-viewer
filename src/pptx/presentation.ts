@@ -28,8 +28,10 @@ export interface PresentationPackage {
   slides: SlideRef[];
 }
 
-// Default 4:3 slide size used only if presentation.xml omits sldSz.
-const DEFAULT_SLIDE_CX = 9144000;
+// Default 16:9 slide size used only if presentation.xml omits sldSz. Modern
+// decks are widescreen, so fall back to 16:9 (12192000 x 6858000) rather than
+// the legacy 4:3 (9144000 x 6858000).
+const DEFAULT_SLIDE_CX = 12192000;
 const DEFAULT_SLIDE_CY = 6858000;
 
 // Open the package and resolve slides in authoritative presentation order

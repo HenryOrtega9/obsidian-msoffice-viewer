@@ -69,7 +69,7 @@ const execFileAsync = promisify(execFile);
 // Bump when the conversion command/flags change (or when a font-setup change
 // alters substitution) so cached PDFs produced under older settings are
 // invalidated instead of silently reused. Folded into the cache key.
-const CONVERSION_VERSION = "3";
+const CONVERSION_VERSION = "4";
 
 // PDF export FilterData shared across the Writer/Calc/Impress export filters.
 // UseLosslessCompression avoids JPEG artifacts on embedded images and
@@ -79,12 +79,21 @@ const PDF_FILTER_DATA =
   '{"UseLosslessCompression":{"type":"boolean","value":"true"},' +
   '"ReduceImageResolution":{"type":"boolean","value":"false"}}';
 
+// Calc-specific FilterData. SinglePageSheets:true renders one un-paginated page
+// per sheet sized to the full used range, ignoring the workbook's print area
+// and paper size. Without it Calc honors the print area and clips to it (and
+// paginates wide/long sheets), which surfaces as a cut-off preview.
+const CALC_PDF_FILTER_DATA =
+  '{"SinglePageSheets":{"type":"boolean","value":"true"},' +
+  '"UseLosslessCompression":{"type":"boolean","value":"true"},' +
+  '"ReduceImageResolution":{"type":"boolean","value":"false"}}';
+
 // Map a source extension to LibreOffice's app-specific PDF export filter so the
 // FilterData options above are honored. Unknown types fall back to plain "pdf".
 function pdfFilterFor(ext: string): string {
   const e = ext.toLowerCase();
   if (["xls", "xlsx", "xlsm", "csv", "ods"].includes(e)) {
-    return `pdf:calc_pdf_Export:${PDF_FILTER_DATA}`;
+    return `pdf:calc_pdf_Export:${CALC_PDF_FILTER_DATA}`;
   }
   if (["ppt", "pptx", "odp"].includes(e)) {
     return `pdf:impress_pdf_Export:${PDF_FILTER_DATA}`;

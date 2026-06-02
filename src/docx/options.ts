@@ -7,6 +7,9 @@ export function buildDocxOptions(): Partial<Options> {
   return {
     className: "docx-claude",
     inWrapper: true,
+    // Drop the on-screen page-shadow wrapper chrome when printing/exporting to
+    // PDF from the HTML fallback. Print-path only; no on-screen effect.
+    hideWrapperOnPrint: true,
     breakPages: true,
     // Honor Word's lastRenderedPageBreak hints so flowing documents paginate
     // instead of collapsing into one tall page. docx-preview can't auto-break
@@ -20,7 +23,9 @@ export function buildDocxOptions(): Partial<Options> {
     renderFooters: true,
     renderFootnotes: true,
     renderEndnotes: true,
-    renderComments: true,
-    renderChanges: true,
+    // Read-only viewer mirrors Word/LibreOffice's default final view: comments
+    // and unaccepted tracked changes are not rendered as inline body content.
+    renderComments: false,
+    renderChanges: false,
   };
 }

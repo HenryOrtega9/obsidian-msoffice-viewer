@@ -1,5 +1,5 @@
 import type ExcelJS from "exceljs";
-import { format as numfmtFormat, dateToSerial } from "numfmt";
+import { format as numfmtFormat, formatColor as numfmtFormatColor, dateToSerial } from "numfmt";
 import { ExcelColorRef, resolveExcelColor } from "./colors";
 import { warn } from "./warn";
 import { RichTextRun, renderRichTextRuns } from "./richText";
@@ -95,6 +95,27 @@ export function cellText(cell: ExcelJS.Cell): string {
   }
 }
 
+// A number format can carry a section color ("[Red]") or conditional-section
+// color ("[<50][Red]..."). Resolve it against the cell's numeric value so it
+// can override the static font color, matching how Excel paints the cell.
+// Returns null for non-numeric values, the General/text format, or when the
+// active section specifies no color.
+export function numberFormatColor(cell: ExcelJS.Cell): string | null {
+  const fmt = cell.numFmt;
+  if (!fmt || fmt === "General" || fmt === "@") return null;
+  const raw = extractCellValue(cell);
+  let serial: number;
+  if (typeof raw === "number") serial = raw;
+  else if (raw instanceof Date) serial = dateToSerial(raw) as number;
+  else return null;
+  try {
+    const color = numfmtFormatColor(fmt, serial, { indexColors: true, throws: false });
+    return typeof color === "string" ? color : null;
+  } catch {
+    return null;
+  }
+}
+
 export function extractCellValue(
   cell: ExcelJS.Cell,
 ): number | string | boolean | Date | null {
@@ -163,14 +184,31 @@ export function cellInlineStyle(cell: ExcelJS.Cell, theme?: readonly string[]): 
 
   const font = cell.font as Partial<ExcelJS.Font> | undefined;
   if (font) {
-    if (font.bold) parts.push("font-weight: 600");
+    // Excel "bold" is weight 700, not 600.
+    if (font.bold) parts.push("font-weight: bold");
     if (font.italic) parts.push("font-style: italic");
-    if (font.underline) parts.push("text-decoration: underline");
+    // strike and underline both live on text-decoration; merge them so one
+    // doesn't clobber the other. "double" underline keeps the double style.
+    const decorations: string[] = [];
+    if (font.underline) {
+      decorations.push(font.underline === "double" ? "underline double" : "underline");
+    }
+    if (font.strike) decorations.push("line-through");
+    if (decorations.length) parts.push(`text-decoration: ${decorations.join(" ")}`);
     if (typeof font.size === "number") parts.push(`font-size: ${font.size}pt`);
     if (font.name) parts.push(`font-family: ${quoteFont(font.name)}`);
+    // super/subscript via vertical-align (sup/sub wrapping is done at the text
+    // level in richText; here the whole cell shifts).
+    if (font.vertAlign === "superscript") parts.push("vertical-align: super");
+    else if (font.vertAlign === "subscript") parts.push("vertical-align: sub");
     const colorCss = resolveExcelColor(font.color as ExcelColorRef | undefined, theme);
     if (colorCss) parts.push(`color: ${colorCss}`);
   }
+
+  // Number-format-driven color (e.g. "#,##0;[Red]-#,##0" shows negatives red).
+  // Applied after the static font color so it overrides it, matching Excel.
+  const fmtColor = numberFormatColor(cell);
+  if (fmtColor) parts.push(`color: ${fmtColor}`);
 
   const fill = cell.fill as ExcelJS.Fill | undefined;
   if (fill && fill.type === "pattern") {
@@ -212,10 +250,27 @@ function quoteFont(name: string): string {
   return /^[A-Za-z0-9_-]+$/.test(name) ? name : `"${name.replace(/"/g, "")}"`;
 }
 
+// OOXML border style -> CSS {width, style}. Excel's automatic (unspecified)
+// border color is black, not a light gray.
+const BORDER_STYLE_CSS: Record<string, { width: string; css: string }> = {
+  hair: { width: "1px", css: "solid" },
+  thin: { width: "1px", css: "solid" },
+  dotted: { width: "1px", css: "dotted" },
+  dashed: { width: "1px", css: "dashed" },
+  dashDot: { width: "1px", css: "dashed" },
+  dashDotDot: { width: "1px", css: "dashed" },
+  slantDashDot: { width: "1px", css: "dashed" },
+  medium: { width: "2px", css: "solid" },
+  mediumDashed: { width: "2px", css: "dashed" },
+  mediumDashDot: { width: "2px", css: "dashed" },
+  mediumDashDotDot: { width: "2px", css: "dashed" },
+  thick: { width: "3px", css: "solid" },
+  double: { width: "3px", css: "double" },
+};
+
 function borderCss(b: Partial<ExcelJS.Border>, theme?: readonly string[]): string {
   const style = b.style ?? "thin";
-  const width = style === "thick" || style === "double" ? "2px" : "1px";
-  const css = style === "double" ? "double" : "solid";
-  const colorCss = resolveExcelColor(b.color as ExcelColorRef | undefined, theme) ?? "#d4d4d4";
+  const { width, css } = BORDER_STYLE_CSS[style] ?? BORDER_STYLE_CSS.thin;
+  const colorCss = resolveExcelColor(b.color as ExcelColorRef | undefined, theme) ?? "#000000";
   return `${width} ${css} ${colorCss}`;
 }

@@ -13,11 +13,21 @@ export function applyRunFontToElement(
 ): void {
   if (!font) return;
   const s = el.style;
-  if (font.bold) s.fontWeight = "600";
+  // Excel "bold" is weight 700, not 600.
+  if (font.bold) s.fontWeight = "bold";
   if (font.italic) s.fontStyle = "italic";
-  if (font.underline) s.textDecoration = "underline";
+  // strike and underline share text-decoration; merge so one doesn't clobber
+  // the other. "double" underline keeps the double style.
+  const decorations: string[] = [];
+  if (font.underline) {
+    decorations.push(font.underline === "double" ? "underline double" : "underline");
+  }
+  if (font.strike) decorations.push("line-through");
+  if (decorations.length) s.textDecoration = decorations.join(" ");
   if (typeof font.size === "number") s.fontSize = `${font.size}pt`;
   if (font.name) s.fontFamily = quoteFont(font.name);
+  if (font.vertAlign === "superscript") s.verticalAlign = "super";
+  else if (font.vertAlign === "subscript") s.verticalAlign = "sub";
   const colorCss = resolveExcelColor(font.color as ExcelColorRef | undefined, theme);
   if (colorCss) s.color = colorCss;
 }

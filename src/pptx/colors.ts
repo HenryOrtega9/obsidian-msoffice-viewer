@@ -1,13 +1,19 @@
 import { NS, elementChildren } from "./ooxml";
 import { DEFAULT_SCHEME, type PptxTheme, type ClrMap } from "./themes";
 
-// DrawingML color modifiers. Values are stored as 0..1 factors (OOXML carries
-// them as thousandths of a percent, e.g. val="50000" => 0.5).
+// DrawingML color modifiers. Percentage-typed values are stored as 0..1 factors
+// (OOXML carries them as thousandths of a percent, e.g. val="50000" => 0.5).
+// hueMod is likewise a 0..1 factor, but hueOff is a fixed angle (60000ths of a
+// degree) normalized here to turns (0..1) to match the 0..1 HSL hue scale.
 export interface ColorMods {
   tint?: number;
   shade?: number;
   lumMod?: number;
   lumOff?: number;
+  satMod?: number;
+  satOff?: number;
+  hueMod?: number;
+  hueOff?: number;
   alpha?: number;
 }
 
@@ -81,6 +87,12 @@ function readMods(colorEl: Element): ColorMods {
       case "shade": mods.shade = v / 100000; break;
       case "lumMod": mods.lumMod = v / 100000; break;
       case "lumOff": mods.lumOff = v / 100000; break;
+      case "satMod": mods.satMod = v / 100000; break;
+      case "satOff": mods.satOff = v / 100000; break;
+      case "hueMod": mods.hueMod = v / 100000; break;
+      // hueOff is ST_FixedAngle (60000ths of a degree); normalize to turns
+      // (deg/360) so it adds onto the 0..1 hue scale used below.
+      case "hueOff": mods.hueOff = v / 21600000; break;
       case "alpha": mods.alpha = v / 100000; break;
     }
   }
@@ -131,12 +143,28 @@ function applyMods(hex6: string, mods: ColorMods): string {
     g = g * mods.tint + 255 * (1 - mods.tint);
     b = b * mods.tint + 255 * (1 - mods.tint);
   }
-  if (mods.lumMod != null || mods.lumOff != null) {
+  // HSL modifiers, applied in fixed order hue -> sat -> lum. All operate on the
+  // 0..1 HSL scale (hue wraps into [0,1)).
+  if (
+    mods.hueMod != null ||
+    mods.hueOff != null ||
+    mods.satMod != null ||
+    mods.satOff != null ||
+    mods.lumMod != null ||
+    mods.lumOff != null
+  ) {
     const hsl = rgbToHsl(r, g, b);
+    let h = hsl.h;
+    let s = hsl.s;
     let l = hsl.l;
+    if (mods.hueMod != null) h *= mods.hueMod;
+    if (mods.hueOff != null) h += mods.hueOff;
+    h -= Math.floor(h); // wrap into [0,1)
+    if (mods.satMod != null) s *= mods.satMod;
+    if (mods.satOff != null) s += mods.satOff;
     if (mods.lumMod != null) l *= mods.lumMod;
     if (mods.lumOff != null) l += mods.lumOff;
-    const rgb = hslToRgb(hsl.h, hsl.s, clamp01(l));
+    const rgb = hslToRgb(h, clamp01(s), clamp01(l));
     r = rgb.r;
     g = rgb.g;
     b = rgb.b;
