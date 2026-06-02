@@ -71,6 +71,72 @@ const execFileAsync = promisify(execFile);
 // invalidated instead of silently reused. Folded into the cache key.
 const CONVERSION_VERSION = "4";
 
+// Hard ceiling on a single conversion. A hung soffice shouldn't block a view
+// for minutes; real conversions finish in seconds, so 90s is generous.
+const CONVERSION_TIMEOUT_MS = 90_000;
+
+// After a conversion fails, don't re-attempt the same content for this long, so
+// a corrupt/unsupported file falls back fast instead of relocking the viewer
+// (and blocking for the full timeout) on every open.
+const FAILURE_QUARANTINE_MS = 60_000;
+
+// Soft cap on the on-disk PDF cache. After a successful conversion, least-
+// recently-used PDFs are evicted until the cache is back under this size.
+const CACHE_MAX_BYTES = 256 * 1024 * 1024;
+
+// Tag the soffice binary by size+mtime (cheap stat, no subprocess) so upgrading
+// LibreOffice changes the cache key and invalidates PDFs produced by the old
+// build. Memoized per binary path.
+const sofficeTagCache = new Map<string, Promise<string>>();
+function sofficeBinTag(sofficeBin: string): Promise<string> {
+  let p = sofficeTagCache.get(sofficeBin);
+  if (!p) {
+    p = fs
+      .stat(sofficeBin)
+      .then((s) => `${s.size}-${Math.round(s.mtimeMs)}`)
+      .catch(() => "0");
+    sofficeTagCache.set(sofficeBin, p);
+  }
+  return p;
+}
+
+// Content hashes of recently-failed conversions -> failure timestamp (ms).
+const conversionFailures = new Map<string, number>();
+
+// Best-effort LRU eviction: drop the least-recently-used PDFs (by mtime, which
+// we bump on cache hits) until the cache is under maxBytes. Never throws.
+async function evictCache(cacheDir: string, maxBytes: number): Promise<void> {
+  try {
+    const names = (await fs.readdir(cacheDir)).filter((n) => n.endsWith(".pdf"));
+    const stats = await Promise.all(
+      names.map(async (name) => {
+        const p = path.join(cacheDir, name);
+        try {
+          const s = await fs.stat(p);
+          return { p, size: s.size, mtime: s.mtimeMs };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const valid = stats.filter((s): s is { p: string; size: number; mtime: number } => s != null);
+    let total = valid.reduce((sum, s) => sum + s.size, 0);
+    if (total <= maxBytes) return;
+    valid.sort((a, b) => a.mtime - b.mtime); // oldest first
+    for (const s of valid) {
+      if (total <= maxBytes) break;
+      try {
+        await fs.unlink(s.p);
+        total -= s.size;
+      } catch {
+        // best-effort
+      }
+    }
+  } catch {
+    // best-effort; eviction failure must never break a conversion
+  }
+}
+
 // PDF export FilterData shared across the Writer/Calc/Impress export filters.
 // UseLosslessCompression avoids JPEG artifacts on embedded images and
 // ReduceImageResolution:false keeps images at full resolution — both maximize
@@ -225,9 +291,10 @@ export async function convertOfficeToPdf(
   cacheDir: string,
 ): Promise<string> {
   const bytes = new Uint8Array(buf);
+  const binTag = await sofficeBinTag(sofficeBin);
   const hash = createHash("sha256")
     .update(bytes)
-    .update(` ${CONVERSION_VERSION} ${originalExtension.toLowerCase()}`)
+    .update(` ${CONVERSION_VERSION} ${originalExtension.toLowerCase()} ${binTag}`)
     .digest("hex")
     .slice(0, 16);
   await fs.mkdir(cacheDir, { recursive: true });
@@ -235,9 +302,22 @@ export async function convertOfficeToPdf(
   const cachedPdf = path.join(cacheDir, `${hash}.pdf`);
   try {
     await fs.access(cachedPdf);
+    // Bump mtime so the LRU eviction treats this as recently used.
+    const now = new Date();
+    void fs.utimes(cachedPdf, now, now).catch(() => {});
     return cachedPdf;
   } catch {
     // cache miss; convert
+  }
+
+  // Skip files that recently failed to convert so a bad file doesn't block the
+  // viewer for the full timeout on every open; the caller falls back instead.
+  const failedAt = conversionFailures.get(hash);
+  if (failedAt != null) {
+    if (Date.now() - failedAt < FAILURE_QUARANTINE_MS) {
+      throw new Error("Conversion recently failed for this file; skipping retry");
+    }
+    conversionFailures.delete(hash);
   }
 
   const existing = inFlightConversions.get(hash);
@@ -262,10 +342,16 @@ export async function convertOfficeToPdf(
           cacheDir,
           stagedInput,
         ],
-        { timeout: 120000 },
+        { timeout: CONVERSION_TIMEOUT_MS },
       );
       await fs.access(cachedPdf);
+      conversionFailures.delete(hash);
+      // Trim the cache in the background; never block returning the PDF.
+      void evictCache(cacheDir, CACHE_MAX_BYTES);
       return cachedPdf;
+    } catch (err) {
+      conversionFailures.set(hash, Date.now());
+      throw err;
     } finally {
       try {
         await fs.unlink(stagedInput);
