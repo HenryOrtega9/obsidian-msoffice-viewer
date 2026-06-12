@@ -1,5 +1,10 @@
 import type ExcelJS from "exceljs";
-import { format as numfmtFormat, formatColor as numfmtFormatColor, dateToSerial } from "numfmt";
+import {
+  format as numfmtFormat,
+  formatColor as numfmtFormatColor,
+  dateToSerial,
+  isDateFormat,
+} from "numfmt";
 import { ExcelColorRef, resolveExcelColor } from "./colors";
 import { warn } from "./warn";
 import { RichTextRun, renderRichTextRuns } from "./richText";
@@ -76,25 +81,56 @@ export function cellText(cell: ExcelJS.Cell): string {
     return raw ? "TRUE" : "FALSE";
   }
   if (raw instanceof Date) {
+    // ExcelJS encodes the spreadsheet wall-clock time in the Date's UTC
+    // fields; ignoreTimezone keeps dateToSerial from re-reading it via the
+    // host's local timezone (which would skew the serial by the UTC offset).
+    const serial = dateToSerial(raw, { ignoreTimezone: true }) as number;
     if (fmt && fmt !== "General") {
       try {
-        return numfmtFormat(fmt, dateToSerial(raw));
+        return numfmtFormat(fmt, serial);
       } catch (e) {
         warn("numfmt", e, { fmt, raw, kind: "date" });
       }
     }
+    // No/General format: Excel shows a fixed short date (plus time when the
+    // serial carries a fractional day), not the platform locale's rendering.
+    try {
+      const defFmt = serial % 1 !== 0 ? "m/d/yyyy h:mm" : "m/d/yyyy";
+      return numfmtFormat(defFmt, serial);
+    } catch (e) {
+      warn("numfmt", e, { fmt: "General", raw, kind: "date" });
+    }
     return raw.toLocaleDateString();
   }
-  // Number
+  // Number. "@" (Text) shows a number as its General string, so both routes
+  // share numfmt's General formatter.
   if (!fmt || fmt === "General" || fmt === "@") {
     return formatGeneralNumber(raw);
   }
   try {
-    return numfmtFormat(fmt, raw);
+    return numfmtFormat(fmt, adjustSerialForDate1904(cell, fmt, raw));
   } catch (e) {
     warn("numfmt", e, { fmt, raw, kind: "number" });
     return formatGeneralNumber(raw);
   }
+}
+
+// Days between the 1900 and 1904 Excel epochs. numfmt only understands the
+// 1900 date system, so serials from a 1904 workbook shift forward before
+// formatting. Only applies to raw numeric serials under a date format —
+// ExcelJS already converts 1904 serials when it surfaces Date objects.
+const DATE_1904_OFFSET = 1462;
+
+function adjustSerialForDate1904(
+  cell: ExcelJS.Cell,
+  fmt: string,
+  serial: number,
+): number {
+  if (!isDateFormat(fmt)) return serial;
+  const wb = cell.worksheet?.workbook as
+    | { properties?: { date1904?: boolean } }
+    | undefined;
+  return wb?.properties?.date1904 ? serial + DATE_1904_OFFSET : serial;
 }
 
 // A number format can carry a section color ("[Red]") or conditional-section
@@ -108,7 +144,8 @@ export function numberFormatColor(cell: ExcelJS.Cell): string | null {
   const raw = extractCellValue(cell);
   let serial: number;
   if (typeof raw === "number") serial = raw;
-  else if (raw instanceof Date) serial = dateToSerial(raw) as number;
+  // ignoreTimezone: ExcelJS dates carry the wall-clock in UTC fields.
+  else if (raw instanceof Date) serial = dateToSerial(raw, { ignoreTimezone: true }) as number;
   else return null;
   try {
     const color = numfmtFormatColor(fmt, serial, { indexColors: true, throws: false });
@@ -174,6 +211,13 @@ function resultValue(
 
 export function formatGeneralNumber(n: number): string {
   if (!Number.isFinite(n)) return String(n);
+  // numfmt's General formatter carries Excel's 11-significant-digit and
+  // scientific-notation switchover rules.
+  try {
+    return numfmtFormat("General", n);
+  } catch (e) {
+    warn("numfmt", e, { fmt: "General", raw: n, kind: "number" });
+  }
   if (Number.isInteger(n)) return String(n);
   // Trim FP artifacts (e.g. 22045.858999999997 → 22045.859). Excel's General
   // format shows up to ~11 significant digits, so ~10 decimals is plenty.
