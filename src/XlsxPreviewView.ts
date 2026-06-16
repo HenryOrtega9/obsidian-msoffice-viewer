@@ -12,6 +12,7 @@ import type { Chart } from "chart.js";
 import { ExcelColorRef, resolveExcelColor } from "./xlsx/colors";
 import { loadWorkbookTheme } from "./xlsx/themes";
 import { colNum } from "./xlsx/merges";
+import { closeActivePopover } from "./xlsx/notes";
 import type { InternalLinkTarget } from "./xlsx/hyperlinks";
 
 export const XLSX_CLAUDE_VIEW_TYPE = "xlsx-claude-view";
@@ -75,6 +76,7 @@ export class XlsxPreviewView extends OfficeFileView {
   }
 
   private resetState(): void {
+    closeActivePopover();
     this.revokeImageUrls();
     this.destroyCharts();
     this.workbook = null;
@@ -264,10 +266,10 @@ export class XlsxPreviewView extends OfficeFileView {
 
     const visibleCount = this.sheets.filter((s) => !s.hidden).length;
     if (visibleCount === 0 && this.sheets.length === 0) {
-      this.renderEl
-        .createDiv({ cls: "docx-claude-pdf-error" })
-        .setText("This workbook has no visible sheets.");
-      return;
+      // Throw rather than render an error div: tryRenderGrid then returns false
+      // so the caller falls back to the PDF path (which may still render this
+      // workbook), instead of the grid masking a renderable file with an error.
+      throw new Error("xlsx-grid: no renderable sheets");
     }
     if (visibleCount === 0) {
       // All sheets are hidden — auto-enable showHidden so the user sees something.
@@ -336,6 +338,7 @@ export class XlsxPreviewView extends OfficeFileView {
     if (!this.gridEl) return;
     const entry = this.sheets.find((s) => s.name === name);
     if (!entry) return;
+    closeActivePopover();
     this.revokeImageUrls();
     this.destroyCharts();
     this.gridEl.empty();
@@ -368,6 +371,7 @@ export class XlsxPreviewView extends OfficeFileView {
       return;
     }
     if (this.file !== file || !this.renderEl) return;
+    closeActivePopover();
     this.destroyCharts();
     this.revokeImageUrls();
     if (this.tabsEl) {

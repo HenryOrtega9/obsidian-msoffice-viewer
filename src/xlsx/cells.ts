@@ -35,7 +35,15 @@ export function renderCellInto(
     renderRichTextRuns(runs, td, opts.theme);
   } else {
     const text = cellText(cell);
-    if (text) td.setText(text);
+    if (text) {
+      // Wrap super/subscript text in semantic <sup>/<sub> so it actually
+      // renders raised/lowered (and smaller, via the UA stylesheet) without
+      // colliding with the cell's vertical-align.
+      const va = (cell.font as Partial<ExcelJS.Font> | undefined)?.vertAlign;
+      if (va === "superscript") td.createEl("sup").setText(text);
+      else if (va === "subscript") td.createEl("sub").setText(text);
+      else td.setText(text);
+    }
   }
 
   const style = cellInlineStyle(cell, opts.theme);
@@ -243,10 +251,9 @@ export function cellInlineStyle(cell: ExcelJS.Cell, theme?: readonly string[]): 
     if (decorations.length) parts.push(`text-decoration: ${decorations.join(" ")}`);
     if (typeof font.size === "number") parts.push(`font-size: ${font.size}pt`);
     if (font.name) parts.push(`font-family: ${quoteFont(font.name)}`);
-    // super/subscript via vertical-align (sup/sub wrapping is done at the text
-    // level in richText; here the whole cell shifts).
-    if (font.vertAlign === "superscript") parts.push("vertical-align: super");
-    else if (font.vertAlign === "subscript") parts.push("vertical-align: sub");
+    // super/subscript is applied by wrapping the text in <sup>/<sub> in
+    // renderCellInto, NOT a cell-level vertical-align (which would collide with
+    // and be clobbered by the alignment.vertical declaration below).
     const colorCss = resolveExcelColor(font.color as ExcelColorRef | undefined, theme);
     if (colorCss) parts.push(`color: ${colorCss}`);
   }
@@ -280,6 +287,16 @@ export function cellInlineStyle(cell: ExcelJS.Cell, theme?: readonly string[]): 
       const raw = align.vertical as string;
       const v = raw === "middle" || raw === "center" ? "middle" : raw;
       parts.push(`vertical-align: ${v}`);
+    }
+    // Indent levels (~3 char-widths each in Excel). Pivot tables encode their
+    // grouped row-label hierarchy purely as indent, so honoring it restores
+    // the visual nesting. Emit a full-side padding (overriding only that side's
+    // base cell pad) for positive indent; leave indent-0 cells untouched.
+    const indent = typeof align.indent === "number" ? align.indent : 0;
+    if (indent > 0) {
+      const rtl = (align as { readingOrder?: unknown }).readingOrder === "rtl";
+      const side = align.horizontal === "right" || rtl ? "padding-right" : "padding-left";
+      parts.push(`${side}: ${6 + indent * 9}px`);
     }
     if (align.wrapText) parts.push("white-space: normal");
   }

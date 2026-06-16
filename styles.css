@@ -139,6 +139,27 @@
   border-radius: 4px;
 }
 
+/* A very tall page (e.g. a long sheet after SinglePageSheets) is rendered as
+   vertically stacked tile canvases so each keeps full horizontal resolution.
+   The frame lives on the wrapper so the stacked tiles read as one seamless
+   page. */
+.docx-claude-pdf-tilewrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 1280px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.docx-claude-pdf-tile {
+  display: block;
+  width: 100%;
+}
+
 .docx-claude-pdf-loading {
   padding: 2rem;
   text-align: center;
@@ -363,6 +384,11 @@
 }
 
 .docx-claude-xlsx-table {
+  /* table-layout: fixed makes the per-column <col style="width:Npx"> widths
+     authoritative, so DOM geometry matches the computed cumulativeColPx that
+     image/chart overlays and frozen panes are positioned against (auto layout
+     widened columns to fit content and desynced them). */
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   font-family: var(--font-text);
@@ -376,7 +402,9 @@
   border-right: 1px solid #d4d4d4;
   border-bottom: 1px solid #d4d4d4;
   padding: 2px 6px;
-  min-width: 32px;
+  /* Under fixed layout a cell can't grow to fit content, so clip overflow at
+     the cell edge instead of letting nowrap text spill across columns. */
+  overflow: hidden;
   white-space: nowrap;
   color: #1f1f1f;
   background: #ffffff;

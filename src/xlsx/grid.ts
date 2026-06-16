@@ -1,3 +1,4 @@
+import { Notice } from "obsidian";
 import type ExcelJS from "exceljs";
 import { renderCellInto } from "./cells";
 import {
@@ -50,6 +51,15 @@ const MIN_GRID_ROWS = 50;
 const COL_PAD = 2;
 const ROW_PAD = 8;
 
+// Hard ceiling on the rendered range. The grid builds one <td> per cell
+// synchronously on the UI thread, so a sheet whose stored dimension or a single
+// far-flung cell claims a range up to 1,048,576 x 16,384 would create millions
+// of nodes and freeze (or OOM) Obsidian. These caps keep the DOM bounded; a
+// genuinely larger sheet is truncated with a notice (and renders fine via the
+// default PDF path regardless).
+const HARD_MAX_ROWS = 5000;
+const HARD_MAX_COLS = 256;
+
 export interface GridContext {
   sheetWrapEl: HTMLElement;
   tableEl: HTMLTableElement;
@@ -80,15 +90,24 @@ export function renderSheetIntoGrid(
   // Extend dimensions to cover every merge bound so anchor cells that sit
   // beyond actualColumnCount/actualRowCount still get rendered (and the
   // spans never overrun the colgroup).
+  // Seed from the POPULATED extent (count of non-empty rows/cols).
   let lastCol = Math.max(1, ws.actualColumnCount || ws.columnCount || 1);
   let lastRow = Math.max(1, ws.actualRowCount || ws.rowCount || 1);
   // ws.dimensions reflects the stored used range; actualRowCount/actualColumnCount
   // count non-empty rows/cols and can under-report trailing format-only or
-  // merge-only cells, so fold the stored bounds in too.
+  // merge-only cells, so fold the stored bounds in — but ONLY when they sit
+  // close to the populated extent. A bogus stored <dimension> or a single
+  // far-flung cell (e.g. A100000 from a whole-column format) otherwise inflates
+  // the range to a freezing/OOM size; in that case keep the populated extent
+  // and let the hard cap below be the backstop.
   const dims = ws.dimensions as { bottom?: number; right?: number } | undefined;
   if (dims) {
-    if (typeof dims.right === "number" && dims.right > lastCol) lastCol = dims.right;
-    if (typeof dims.bottom === "number" && dims.bottom > lastRow) lastRow = dims.bottom;
+    if (typeof dims.right === "number" && dims.right > lastCol && dims.right <= lastCol + COL_PAD * 4) {
+      lastCol = dims.right;
+    }
+    if (typeof dims.bottom === "number" && dims.bottom > lastRow && dims.bottom <= lastRow + ROW_PAD * 4) {
+      lastRow = dims.bottom;
+    }
   }
   for (const m of merges) {
     if (m.right > lastCol) lastCol = m.right;
@@ -98,6 +117,18 @@ export function renderSheetIntoGrid(
   // Pad with empty trailing rows/columns for a spreadsheet-like canvas.
   lastCol = Math.max(lastCol + COL_PAD, MIN_GRID_COLS);
   lastRow = Math.max(lastRow + ROW_PAD, MIN_GRID_ROWS);
+
+  // Backstop: never build an unbounded DOM. Truncate to the hard caps and warn
+  // so data isn't silently dropped.
+  if (lastRow > HARD_MAX_ROWS || lastCol > HARD_MAX_COLS) {
+    new Notice(
+      `This sheet is very large; showing the first ${Math.min(lastRow, HARD_MAX_ROWS)} rows × ` +
+        `${Math.min(lastCol, HARD_MAX_COLS)} columns. Use "Open in Excel" for the full sheet.`,
+      8000,
+    );
+    lastCol = Math.min(lastCol, HARD_MAX_COLS);
+    lastRow = Math.min(lastRow, HARD_MAX_ROWS);
+  }
 
   const skipMap = computeMergeSkipMap(merges);
   const mergeAnchor = new Map<string, MergeRect>();

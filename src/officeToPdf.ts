@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import * as path from "node:path";
 import * as os from "node:os";
 import { pathToFileURL } from "node:url";
+import { flattenPivotTables } from "./xlsx/flatten";
 
 declare const __PDFJS_WORKER_SOURCE__: string;
 
@@ -67,9 +68,10 @@ const WORKER_FILE_CONTENT = RUNTIME_POLYFILLS + __PDFJS_WORKER_SOURCE__;
 const execFileAsync = promisify(execFile);
 
 // Bump when the conversion command/flags change (or when a font-setup change
-// alters substitution) so cached PDFs produced under older settings are
-// invalidated instead of silently reused. Folded into the cache key.
-const CONVERSION_VERSION = "4";
+// alters substitution, or the input pre-processing changes) so cached PDFs
+// produced under older settings are invalidated instead of silently reused.
+// Folded into the cache key. v5: xlsx pivot-table flattening (see below).
+const CONVERSION_VERSION = "5";
 
 // Hard ceiling on a single conversion. A hung soffice shouldn't block a view
 // for minutes; real conversions finish in seconds, so 90s is generous.
@@ -328,7 +330,19 @@ export async function convertOfficeToPdf(
     // stage under a hashed basename to make the result path predictable and
     // unique per content hash.
     const stagedInput = path.join(cacheDir, `${hash}.${originalExtension}`);
-    await fs.writeFile(stagedInput, bytes);
+    // For spreadsheets, flatten any Excel PivotTables to their cached static
+    // cells first so LibreOffice keeps the stored number formats instead of
+    // re-deriving raw floats via DataPilot. The cache key hashes the ORIGINAL
+    // bytes (above) — flattening output need not be byte-deterministic, and
+    // flattening only runs on a cache miss. Falls back to the original bytes
+    // when there are no pivots or flattening fails.
+    let inputBytes: Uint8Array = bytes;
+    const ext = originalExtension.toLowerCase();
+    if (ext === "xlsx" || ext === "xlsm") {
+      const flattened = await flattenPivotTables(bytes);
+      if (flattened) inputBytes = flattened;
+    }
+    await fs.writeFile(stagedInput, inputBytes);
     const profileDir = await ensureSofficeProfile(cacheDir);
     try {
       await execFileAsync(
@@ -458,9 +472,16 @@ export function renderPdfPagesIntoStage(
       useWasm: false,
       isOffscreenCanvasSupported: false,
       isImageDecoderSupported: false,
-      // Draw glyphs as canvas paths instead of going through @font-face. The
-      // @font-face route mis-renders LibreOffice's subset fonts.
-      disableFontFace: true,
+      // Render glyphs through @font-face (pdf.js default). disableFontFace:true
+      // forces pdf.js's buildFontPaths glyph-outline parser, which throws
+      // "RangeError: Offset is outside the bounds of the DataView" on the subset
+      // fonts LibreOffice embeds and then SILENTLY DROPS those glyphs — the
+      // cause of missing digits/letters in xlsx (and docx/pptx) previews. The
+      // @font-face path renders LibreOffice subset fonts correctly under
+      // Electron/Chromium; pdf.js's FontLoader awaits font readiness before
+      // painting, so a single render() is sufficient. Verified against poppler
+      // and a real-Chromium harness on the reported pivot-table workbook.
+      disableFontFace: false,
     });
     const pdf = await loadingTask.promise;
     if (stale()) {
@@ -504,44 +525,83 @@ export function renderPdfPagesIntoStage(
         const idx = renderedOrder.splice(pos, 1)[0];
         const s = slots[idx - 1];
         if (s && s.state === "rendered") {
-          s.wrap.querySelector("canvas")?.remove();
+          // A slot holds either one canvas or several stacked tile canvases.
+          s.wrap.querySelectorAll("canvas").forEach((c) => c.remove());
+          s.wrap.querySelector(".docx-claude-pdf-tilewrap")?.remove();
           s.state = "pending";
         }
       }
     };
 
     const renderSlot = async (slot: PageSlot): Promise<void> => {
-      const canvas = slot.wrap.createEl("canvas", { cls: canvasClass });
+      // A slot renders to one canvas, or to several stacked tile canvases for a
+      // very tall page. clearSlot removes whichever it produced.
+      const clearSlot = (): void => {
+        slot.wrap.querySelectorAll("canvas").forEach((c) => c.remove());
+        slot.wrap.querySelector(".docx-claude-pdf-tilewrap")?.remove();
+      };
       try {
         const page = await pdf.getPage(slot.index);
-        if (stale()) { canvas.remove(); slot.state = "pending"; return; }
+        if (stale()) { clearSlot(); slot.state = "pending"; return; }
         const base = page.getViewport({ scale: 1 });
         slot.wrap.style.aspectRatio = `${base.width} / ${base.height}`;
+        // Scale to the display width so cell text keeps full horizontal
+        // resolution. Cap the width so an extremely wide sheet stays within the
+        // browser/GPU canvas size limit.
         let scale = (TARGET_CSS_WIDTH * dpr) / base.width;
         if (scale < 1) scale = 1;
-        let viewport = page.getViewport({ scale });
-        const maxDim = Math.max(viewport.width, viewport.height);
-        if (maxDim > MAX_CANVAS_DIM) {
-          viewport = page.getViewport({ scale: scale * (MAX_CANVAS_DIM / maxDim) });
+        if (base.width * scale > MAX_CANVAS_DIM) scale = MAX_CANVAS_DIM / base.width;
+        const fullW = Math.floor(base.width * scale);
+        const fullH = Math.floor(base.height * scale);
+
+        // After SinglePageSheets:true a long sheet collapses into one very tall
+        // page. Rendering that into a single canvas would force a uniform
+        // downscale (the longest dimension is clamped to MAX_CANVAS_DIM),
+        // starving the horizontal axis and smearing cell text. Instead split a
+        // too-tall page into vertical tiles that each keep the full width and
+        // stack seamlessly, so text stays crisp at any sheet height.
+        const tileCount = Math.max(1, Math.ceil(fullH / MAX_CANVAS_DIM));
+        const renderTile = async (
+          host: HTMLElement,
+          cls: string,
+          topPx: number,
+          heightPx: number,
+        ): Promise<void> => {
+          const canvas = host.createEl("canvas", { cls });
+          canvas.width = fullW;
+          canvas.height = heightPx;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("2d canvas context unavailable");
+          // offsetY shifts the page up so this slice lands at the canvas top.
+          const viewport = page.getViewport({ scale, offsetY: -topPx });
+          const task = page.render({ canvasContext: ctx, viewport, canvas });
+          currentRenderTask = task as unknown as { cancel?: () => void };
+          await task.promise;
+          currentRenderTask = null;
+        };
+
+        if (tileCount === 1) {
+          await renderTile(slot.wrap, canvasClass, 0, fullH);
+        } else {
+          const tileWrap = slot.wrap.createDiv({ cls: "docx-claude-pdf-tilewrap" });
+          for (let t = 0; t < tileCount; t++) {
+            const top = Math.floor((fullH * t) / tileCount);
+            const bottom = Math.floor((fullH * (t + 1)) / tileCount);
+            await renderTile(tileWrap, "docx-claude-pdf-tile", top, bottom - top);
+            if (stale()) { clearSlot(); slot.state = "pending"; return; }
+          }
         }
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("2d canvas context unavailable");
-        const task = page.render({ canvasContext: ctx, viewport, canvas });
-        currentRenderTask = task as unknown as { cancel?: () => void };
-        await task.promise;
-        currentRenderTask = null;
+
         try { page.cleanup(); } catch { /* ignore */ }
-        if (stale()) { canvas.remove(); slot.state = "pending"; return; }
+        if (stale()) { clearSlot(); slot.state = "pending"; return; }
         slot.state = "rendered";
         renderedOrder.push(slot.index);
         evictIfNeeded(slot.index);
       } catch (e) {
         currentRenderTask = null;
-        if (stale()) { canvas.remove(); slot.state = "pending"; return; }
+        clearSlot();
+        if (stale()) { slot.state = "pending"; return; }
         console.error(`PDF render failed on page ${slot.index}:`, e);
-        canvas.remove();
         slot.wrap
           .createDiv({ cls: "docx-claude-pdf-error" })
           .setText(

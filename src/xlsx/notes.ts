@@ -78,7 +78,10 @@ function toggleNotePopover(anchor: HTMLElement, note: CellNote, host: HTMLElemen
   }, 0);
 }
 
-function closeActivePopover(): void {
+// Exported so the view can tear down a popover (and its document-level
+// outside-click listener) on sheet switch, file switch, and view unload —
+// otherwise the listener and module globals leak across renders.
+export function closeActivePopover(): void {
   if (activePopover) {
     activePopover.remove();
     activePopover = null;

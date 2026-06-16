@@ -134,14 +134,14 @@ export function applyDataBar(
     if (!hasNegative) {
       const pct = frac * maxLen;
       const end = rule.gradient ? lighter : barColor;
-      td.style.background = `linear-gradient(to right, ${barColor} 0%, ${end} ${pct}%, transparent ${pct}%)`;
+      td.style.backgroundImage = `linear-gradient(to right, ${barColor} 0%, ${end} ${pct}%, transparent ${pct}%)`;
     } else {
       // Negative-aware: bar grows from the zero axis.
       const valuePct = frac * 100;
       if (v >= 0) {
-        td.style.background = `linear-gradient(to right, transparent ${axisPct}%, ${barColor} ${axisPct}%, ${barColor} ${valuePct}%, transparent ${valuePct}%)`;
+        td.style.backgroundImage = `linear-gradient(to right, transparent ${axisPct}%, ${barColor} ${axisPct}%, ${barColor} ${valuePct}%, transparent ${valuePct}%)`;
       } else {
-        td.style.background = `linear-gradient(to right, transparent ${valuePct}%, #d65a5a ${valuePct}%, #d65a5a ${axisPct}%, transparent ${axisPct}%)`;
+        td.style.backgroundImage = `linear-gradient(to right, transparent ${valuePct}%, #d65a5a ${valuePct}%, #d65a5a ${axisPct}%, transparent ${axisPct}%)`;
       }
     }
     td.style.backgroundClip = "padding-box";

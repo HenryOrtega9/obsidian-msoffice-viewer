@@ -12,7 +12,7 @@ export function mergeStyleIntoElement(
 
   const font = style.font as Partial<ExcelJS.Font> | undefined;
   if (font) {
-    if (font.bold) td.style.fontWeight = "600";
+    if (font.bold) td.style.fontWeight = "bold";
     if (font.italic) td.style.fontStyle = "italic";
     if (font.underline) td.style.textDecoration = "underline";
     const c = resolveExcelColor(font.color as ExcelColorRef | undefined, theme);
