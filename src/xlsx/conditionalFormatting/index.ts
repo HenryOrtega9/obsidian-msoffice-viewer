@@ -75,6 +75,13 @@ export function applyConditionalFormatting(
           applyAboveAverage(ws, ctx, ranges, rule as never, stopped, stopIfTrue, theme);
           break;
         case "containsText":
+        case "notContainsText":
+        case "beginsWith":
+        case "endsWith":
+        case "containsBlanks":
+        case "notContainsBlanks":
+        case "containsErrors":
+        case "notContainsErrors":
           applyContainsText(ws, ctx, ranges, rule as never, stopped, stopIfTrue, theme);
           break;
         case "timePeriod":

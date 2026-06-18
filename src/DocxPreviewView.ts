@@ -45,6 +45,10 @@ export class DocxPreviewView extends OfficeFileView {
 
   protected async renderFile(file: TFile): Promise<void> {
     if (!this.renderEl) return;
+    // Tear down any in-flight PDF render before re-rendering, so switching from
+    // PDF to the docx-preview HTML (manual toggle or PDF-fail fallback) doesn't
+    // leak the PDF.js document + IntersectionObserver. Idempotent.
+    this.cancelActivePdfRender();
     this.renderEl.empty();
 
     const buf = await this.app.vault.readBinary(file);

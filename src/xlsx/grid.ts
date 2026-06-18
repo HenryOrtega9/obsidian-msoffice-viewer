@@ -159,8 +159,14 @@ export function renderSheetIntoGrid(
   const cumulativeColPx: number[] = [0]; // cumulativeColPx[0] = 0 (offset before col 1)
   for (let c = 1; c <= lastCol; c++) {
     const col = ws.getColumn(c);
-    const widthPx =
-      typeof col.width === "number" ? storedWidthToPx(col.width) : defaultColPx;
+    // Hidden columns collapse to 0px (mirrors the hidden-row branch below):
+    // table-layout:fixed + overflow:hidden clips the cell, and a 0 here keeps
+    // cumulativeColPx — and thus the image/chart overlay offsets — aligned.
+    const widthPx = col.hidden
+      ? 0
+      : typeof col.width === "number"
+        ? storedWidthToPx(col.width)
+        : defaultColPx;
     const colEl = colgroup.createEl("col");
     colEl.setAttribute("style", `width: ${widthPx}px`);
     cumulativeColPx.push(cumulativeColPx[c - 1] + widthPx);

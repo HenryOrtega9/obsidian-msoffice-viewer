@@ -82,15 +82,21 @@ export function wrapInHyperlink(
   td.appendChild(a);
 }
 
-// Recognize forms like `#'Sheet Name'!A1`, `#Sheet1!B5`, or sheet-relative
-// targets ExcelJS sometimes hands us without the leading hash.
+// Recognize forms like `#'Sheet Name'!A1`, `#Sheet1!B5`, absolute refs like
+// `#Sheet1!$A$1`, ranges like `#Sheet1!$A$1:$B$10` (reduced to the top-left
+// cell), or sheet-relative targets ExcelJS sometimes hands us without the
+// leading hash. The address part allows optional $ on row/column.
 function parseInternalLink(url: string): InternalLinkTarget | null {
   const stripped = url.startsWith("#") ? url.slice(1) : url;
+  // Strip absolute-ref $ and reduce a range to its top-left cell so
+  // followInternalLink's colNum/cellMatch keep working unchanged.
+  const clean = (a: string): string => a.replace(/\$/g, "").split(":")[0];
+  const addr = "\\$?[A-Z]+\\$?\\d+(?::\\$?[A-Z]+\\$?\\d+)?";
   // Quoted sheet name: '...' allowing escaped quote pair ''
-  const quoted = stripped.match(/^'((?:[^']|'')+)'!([A-Z]+\d+)$/);
-  if (quoted) return { sheet: quoted[1].replace(/''/g, "'"), address: quoted[2] };
+  const quoted = stripped.match(new RegExp(`^'((?:[^']|'')+)'!(${addr})$`));
+  if (quoted) return { sheet: quoted[1].replace(/''/g, "'"), address: clean(quoted[2]) };
   // Unquoted sheet name (no spaces or special chars).
-  const plain = stripped.match(/^([A-Za-z_][A-Za-z0-9_]*)!([A-Z]+\d+)$/);
-  if (plain) return { sheet: plain[1], address: plain[2] };
+  const plain = stripped.match(new RegExp(`^([A-Za-z_][A-Za-z0-9_]*)!(${addr})$`));
+  if (plain) return { sheet: plain[1], address: clean(plain[2]) };
   return null;
 }

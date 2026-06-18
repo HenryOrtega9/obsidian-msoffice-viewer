@@ -1,9 +1,12 @@
-import type { AnchorPoint } from "../geometry";
+import { type AnchorPoint, EMU_PER_PX } from "../geometry";
 import { NS, firstChildNS, relId } from "./ooxml";
 
 export interface DrawingChartAnchor {
   from: AnchorPoint;
   to: AnchorPoint | null;
+  // Explicit pixel size for a oneCellAnchor (from + ext). null for twoCellAnchor
+  // (where `to` drives the size). Stored in px to match anchorRangeToBox.
+  ext: { width: number; height: number } | null;
   chartRelId: string;
 }
 
@@ -31,10 +34,22 @@ export function parseDrawingForCharts(doc: Document): DrawingChartAnchor[] {
 
     const from = parseAnchorPoint(firstChildNS(el, NS.xdr, "from"));
     const to = parseAnchorPoint(firstChildNS(el, NS.xdr, "to"));
+    // oneCellAnchor sizes via a direct xdr:ext (cx/cy in EMU); twoCellAnchor has
+    // none (and the inner xfrm a:ext is namespace-disambiguated, so it won't match).
+    const ext = parseExt(el);
     if (!from) continue;
-    out.push({ from, to, chartRelId });
+    out.push({ from, to, ext, chartRelId });
   }
   return out;
+}
+
+function parseExt(el: Element): { width: number; height: number } | null {
+  const extEl = firstChildNS(el, NS.xdr, "ext");
+  if (!extEl) return null;
+  const cx = parseInt(extEl.getAttribute("cx") ?? "", 10);
+  const cy = parseInt(extEl.getAttribute("cy") ?? "", 10);
+  if (!Number.isFinite(cx) || !Number.isFinite(cy) || cx <= 0 || cy <= 0) return null;
+  return { width: cx / EMU_PER_PX, height: cy / EMU_PER_PX };
 }
 
 function parseAnchorPoint(el: Element | null): AnchorPoint | null {

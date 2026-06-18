@@ -76,6 +76,12 @@ export class XlsxPreviewView extends OfficeFileView {
   }
 
   private resetState(): void {
+    // Tear down any in-flight PDF render first: resetState runs on every
+    // renderFile entry (file switch, PDF→grid toggle, PDF-fail→grid fallback),
+    // so without this the PDF.js document + IntersectionObserver leak whenever
+    // we leave PDF mode for the grid. Idempotent, so the extra calls already in
+    // renderViaLibreOfficePdf stay harmless no-ops.
+    this.cancelActivePdfRender();
     closeActivePopover();
     this.revokeImageUrls();
     this.destroyCharts();
@@ -150,6 +156,10 @@ export class XlsxPreviewView extends OfficeFileView {
     this.renderEl.empty();
     try {
       await this.renderViaLibreOfficePdf(file, sofficeBin, file.extension);
+      // Re-check freshness: a rapid file switch during the await would otherwise
+      // write renderMode/toggle label for the wrong file. The stale renderFile
+      // caller then hits its own this.file guard and stops.
+      if (this.file !== file || !this.renderEl) return false;
       this.renderMode = "pdf";
       this.updateToggleLabel();
       return true;
@@ -165,6 +175,9 @@ export class XlsxPreviewView extends OfficeFileView {
     if (!this.renderEl) return false;
     try {
       await this.renderViaExcelJsGrid(file);
+      // Re-check freshness after the async parse so a rapid file switch can't
+      // write renderMode/toggle label for the wrong file.
+      if (this.file !== file || !this.renderEl) return false;
       this.renderMode = "grid";
       this.updateToggleLabel();
       return true;
@@ -383,6 +396,13 @@ export class XlsxPreviewView extends OfficeFileView {
     this.renderEl.empty();
     try {
       await this.renderViaLibreOfficePdf(file, soffice, file.extension);
+      // The view now shows the PDF, so sync the mode, sticky override, and
+      // toggle label (mirrors tryRenderPdf). Without this the toggle still reads
+      // "Interactive grid"→grid was the last mode, trapping the view in PDF with
+      // a wrong label. Set only on success so a failed convert doesn't lie.
+      this.renderMode = "pdf";
+      this.userForcedMode = "pdf";
+      this.updateToggleLabel();
     } catch (e) {
       console.error("LibreOffice fallback failed:", e);
       new Notice("LibreOffice rendering failed. See console for details.");

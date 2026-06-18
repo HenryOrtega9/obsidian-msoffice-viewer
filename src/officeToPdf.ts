@@ -8,6 +8,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { pathToFileURL } from "node:url";
 import { flattenPivotTables } from "./xlsx/flatten";
+import { normalizeSheetViews } from "./xlsx/views";
 
 declare const __PDFJS_WORKER_SOURCE__: string;
 
@@ -71,7 +72,9 @@ const execFileAsync = promisify(execFile);
 // alters substitution, or the input pre-processing changes) so cached PDFs
 // produced under older settings are invalidated instead of silently reused.
 // Folded into the cache key. v5: xlsx pivot-table flattening (see below).
-const CONVERSION_VERSION = "5";
+// v6: xlsx sheetView scroll-position normalization (topLeftCell/pane reset to
+// A1) — fixes the SinglePageSheets blank-top render (tdf#164683 / tdf#155351).
+const CONVERSION_VERSION = "6";
 
 // Hard ceiling on a single conversion. A hung soffice shouldn't block a view
 // for minutes; real conversions finish in seconds, so 90s is generous.
@@ -286,6 +289,25 @@ export function pluginCacheDir(pluginId: string): string {
 // the output path.
 const inFlightConversions = new Map<string, Promise<string>>();
 
+// All conversions share ONE LibreOffice UserInstallation profile (so the font
+// substitutions are seeded once). LibreOffice locks that profile per process,
+// so two soffice spawns running at once against it collide — the loser aborts
+// with a WrappedTargetRuntimeException and the conversion fails (then gets
+// quarantined). This bites on workspace restore with several Office files open,
+// or opening files in quick succession in split panes. Serialize just the
+// spawns behind a promise chain so at most one soffice runs at a time; the
+// flatten/normalize/stage I/O above stays parallel. A rejected job must not
+// poison the chain, so the tail swallows the settlement.
+let sofficeQueue: Promise<unknown> = Promise.resolve();
+function runSofficeExclusive<T>(task: () => Promise<T>): Promise<T> {
+  const result = sofficeQueue.then(task, task);
+  sofficeQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 export async function convertOfficeToPdf(
   sofficeBin: string,
   buf: ArrayBuffer,
@@ -341,22 +363,32 @@ export async function convertOfficeToPdf(
     if (ext === "xlsx" || ext === "xlsm") {
       const flattened = await flattenPivotTables(bytes);
       if (flattened) inputBytes = flattened;
+      // Reset each sheet's saved scroll offset (sheetView/@topLeftCell and any
+      // frozen pane/@topLeftCell) so LibreOffice's SinglePageSheets export
+      // paints from row 1 instead of leaving the rows above the offset blank
+      // (tdf#164683 / tdf#155351). Runs on the post-flatten bytes so a workbook
+      // that is both pivot-bearing and scrolled gets both fixes; null falls
+      // back to inputBytes unchanged.
+      const normalized = await normalizeSheetViews(inputBytes);
+      if (normalized) inputBytes = normalized;
     }
     await fs.writeFile(stagedInput, inputBytes);
     const profileDir = await ensureSofficeProfile(cacheDir);
     try {
-      await execFileAsync(
-        sofficeBin,
-        [
-          "--headless",
-          `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
-          "--convert-to",
-          pdfFilterFor(originalExtension),
-          "--outdir",
-          cacheDir,
-          stagedInput,
-        ],
-        { timeout: CONVERSION_TIMEOUT_MS },
+      await runSofficeExclusive(() =>
+        execFileAsync(
+          sofficeBin,
+          [
+            "--headless",
+            `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+            "--convert-to",
+            pdfFilterFor(originalExtension),
+            "--outdir",
+            cacheDir,
+            stagedInput,
+          ],
+          { timeout: CONVERSION_TIMEOUT_MS },
+        ),
       );
       await fs.access(cachedPdf);
       conversionFailures.delete(hash);

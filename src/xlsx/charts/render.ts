@@ -70,7 +70,7 @@ export function renderSheetCharts(
     }
     count++;
 
-    const box = anchorRangeToBox(placement.from, placement.to, null, ctx);
+    const box = anchorRangeToBox(placement.from, placement.to, placement.ext, ctx);
     const holder = layer.createDiv({ cls: "docx-claude-xlsx-chart-holder" });
     holder.style.left = `${box.left}px`;
     holder.style.top = `${box.top}px`;
@@ -153,7 +153,7 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
     } as ChartConfiguration;
   }
 
-  const labels = spec.series[0]?.categories ?? [];
+  const rawLabels = spec.series[0]?.categories ?? [];
 
   if (isPieLike(spec.kind)) {
     const s = spec.series[0];
@@ -161,7 +161,7 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
     return {
       type: cjsType,
       data: {
-        labels,
+        labels: rawLabels,
         datasets: [{
           data: s.values,
           backgroundColor: s.values.map((_, i) => PALETTE[i % PALETTE.length]),
@@ -170,6 +170,12 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
       options: common,
     } as ChartConfiguration;
   }
+
+  // Synthesize Excel-style 1..n category labels when <c:cat> is absent, and pad
+  // when series[0]'s categories are shorter than the longest series — otherwise
+  // chart.js draws 0 of N points (a completely blank chart).
+  const n = Math.max(0, ...spec.series.map((s) => s.values.length));
+  const labels = Array.from({ length: n }, (_, i) => rawLabels[i] ?? String(i + 1));
 
   const stacked = spec.stacked === true;
   const fill = spec.kind === "area";

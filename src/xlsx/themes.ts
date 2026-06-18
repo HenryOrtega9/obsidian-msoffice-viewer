@@ -4,15 +4,18 @@ import { warn } from "./warn";
 
 const DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
 
-// OOXML stores clrScheme children in file order: lt1, dk1, lt2, dk2, accent1..6, hlink, folHlink.
-// But ExcelJS reports cell theme indexes using Excel's swapped order:
-// dk1, lt1, dk2, lt2, accent1..6, hlink, folHlink.
-// So we map: excelIndex 0 = file's dk1, 1 = file's lt1, 2 = file's dk2, 3 = file's lt2, rest in order.
+// OOXML clrScheme children appear in file order dk1, lt1, dk2, lt2, accent1..6,
+// hlink, folHlink. Excel's <color theme="n"> indexes a DIFFERENT order that
+// swaps the first two pairs: 0=lt1(Background1), 1=dk1(Text1), 2=lt2, 3=dk2,
+// then accent1..6 (4..9), hlink (10), folHlink (11). We key on each child's
+// localName (not file position), so this maps each scheme slot to the Excel
+// theme index ExcelJS reports on cells. (Getting 0/1 backwards renders default
+// black Text1 as white — the dk1/lt1 slots must not be swapped.)
 const FILE_TO_EXCEL_INDEX: Record<string, number> = {
-  lt1: 1,
-  dk1: 0,
-  lt2: 3,
-  dk2: 2,
+  lt1: 0,
+  dk1: 1,
+  lt2: 2,
+  dk2: 3,
   accent1: 4,
   accent2: 5,
   accent3: 6,

@@ -2,7 +2,6 @@ import type ExcelJS from "exceljs";
 import {
   format as numfmtFormat,
   formatColor as numfmtFormatColor,
-  dateToSerial,
   isDateFormat,
 } from "numfmt";
 import { ExcelColorRef, resolveExcelColor } from "./colors";
@@ -89,10 +88,7 @@ export function cellText(cell: ExcelJS.Cell): string {
     return raw ? "TRUE" : "FALSE";
   }
   if (raw instanceof Date) {
-    // ExcelJS encodes the spreadsheet wall-clock time in the Date's UTC
-    // fields; ignoreTimezone keeps dateToSerial from re-reading it via the
-    // host's local timezone (which would skew the serial by the UTC offset).
-    const serial = dateToSerial(raw, { ignoreTimezone: true }) as number;
+    const serial = excelDateToSerial(cell, raw);
     if (fmt && fmt !== "General") {
       try {
         return numfmtFormat(fmt, serial);
@@ -141,6 +137,21 @@ function adjustSerialForDate1904(
   return wb?.properties?.date1904 ? serial + DATE_1904_OFFSET : serial;
 }
 
+// Convert an ExcelJS Date back to its Excel serial by inverting ExcelJS's own
+// excelToDate (getTime() is pure UTC ms, so this is host-timezone-agnostic).
+// numfmt.dateToSerial uses a 1899-12-31 epoch that disagrees with ExcelJS's
+// 1899-12-30 epoch for day-fraction/elapsed serials, which made [h]:mm times
+// render ~24h short and go negative; 25569 is the day count from 1899-12-30 to
+// the Unix epoch. date1904 collapses into this helper, so the Date path no
+// longer needs adjustSerialForDate1904 (that still covers raw numeric serials).
+function excelDateToSerial(cell: ExcelJS.Cell, d: Date): number {
+  const wb = cell.worksheet?.workbook as
+    | { properties?: { date1904?: boolean } }
+    | undefined;
+  const date1904 = wb?.properties?.date1904 === true;
+  return 25569 + d.getTime() / 86400000 - (date1904 ? DATE_1904_OFFSET : 0);
+}
+
 // A number format can carry a section color ("[Red]") or conditional-section
 // color ("[<50][Red]..."). Resolve it against the cell's numeric value so it
 // can override the static font color, matching how Excel paints the cell.
@@ -152,8 +163,7 @@ export function numberFormatColor(cell: ExcelJS.Cell): string | null {
   const raw = extractCellValue(cell);
   let serial: number;
   if (typeof raw === "number") serial = raw;
-  // ignoreTimezone: ExcelJS dates carry the wall-clock in UTC fields.
-  else if (raw instanceof Date) serial = dateToSerial(raw, { ignoreTimezone: true }) as number;
+  else if (raw instanceof Date) serial = excelDateToSerial(cell, raw);
   else return null;
   try {
     const color = numfmtFormatColor(fmt, serial, { indexColors: true, throws: false });

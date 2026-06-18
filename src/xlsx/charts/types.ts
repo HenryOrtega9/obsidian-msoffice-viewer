@@ -37,5 +37,8 @@ export interface ChartSpec {
 export interface ChartPlacement {
   from: AnchorPoint;
   to: AnchorPoint | null;
+  // Pixel size for a oneCellAnchor chart (null for twoCellAnchor, where `to`
+  // sizes the box). Without it oneCellAnchor charts collapsed to a 1x1px box.
+  ext: { width: number; height: number } | null;
   spec: ChartSpec;
 }

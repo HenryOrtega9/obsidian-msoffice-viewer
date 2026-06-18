@@ -34,11 +34,15 @@ export function anchorRangeToBox(
     return { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
   }
   if (ext) {
+    // ext.width/height are already pixels (ExcelJS yields cx/cy already divided
+    // by EMU_PER_PX; chart anchors pass cx/cy converted to px). The from.colOff/
+    // rowOff offsets above are genuine EMU and stay divided. Dividing ext again
+    // collapsed one-cell-anchored images/charts to a 1px dot.
     return {
       left,
       top,
-      width: Math.max(1, ext.width / EMU_PER_PX),
-      height: Math.max(1, ext.height / EMU_PER_PX),
+      width: Math.max(1, ext.width),
+      height: Math.max(1, ext.height),
     };
   }
   return { left, top, width: 1, height: 1 };

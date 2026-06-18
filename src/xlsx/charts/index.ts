@@ -85,7 +85,7 @@ async function chartsForSheet(
       if (!chartDoc) continue;
       const spec = parseChartXml(chartDoc, theme);
       if (!spec) continue;
-      placements.push({ from: anchor.from, to: anchor.to, spec });
+      placements.push({ from: anchor.from, to: anchor.to, ext: anchor.ext, spec });
     }
   }
   return placements;
