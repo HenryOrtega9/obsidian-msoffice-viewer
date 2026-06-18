@@ -7,6 +7,9 @@ export interface DrawingChartAnchor {
   // Explicit pixel size for a oneCellAnchor (from + ext). null for twoCellAnchor
   // (where `to` drives the size). Stored in px to match anchorRangeToBox.
   ext: { width: number; height: number } | null;
+  // absoluteAnchor box in px (pos + ext, EMU→px), positioned independent of
+  // cells. null for cell-based anchors; when set it overrides from/to/ext.
+  abs: { x: number; y: number; width: number; height: number } | null;
   chartRelId: string;
 }
 
@@ -21,7 +24,13 @@ export function parseDrawingForCharts(doc: Document): DrawingChartAnchor[] {
     if (anchor.nodeType !== 1) continue;
     const el = anchor as Element;
     if (el.namespaceURI !== NS.xdr) continue;
-    if (el.localName !== "twoCellAnchor" && el.localName !== "oneCellAnchor") continue;
+    if (
+      el.localName !== "twoCellAnchor" &&
+      el.localName !== "oneCellAnchor" &&
+      el.localName !== "absoluteAnchor"
+    ) {
+      continue;
+    }
 
     const frame = firstChildNS(el, NS.xdr, "graphicFrame");
     if (!frame) continue;
@@ -32,15 +41,37 @@ export function parseDrawingForCharts(doc: Document): DrawingChartAnchor[] {
     const chartRelId = relId(chartEl);
     if (!chartRelId) continue;
 
+    if (el.localName === "absoluteAnchor") {
+      // pos + ext (both EMU), positioned independent of the grid.
+      const abs = parseAbsBox(el);
+      if (!abs) continue;
+      out.push({ from: { col: 0, colOff: 0, row: 0, rowOff: 0 }, to: null, ext: null, abs, chartRelId });
+      continue;
+    }
+
     const from = parseAnchorPoint(firstChildNS(el, NS.xdr, "from"));
+    if (!from) continue;
     const to = parseAnchorPoint(firstChildNS(el, NS.xdr, "to"));
     // oneCellAnchor sizes via a direct xdr:ext (cx/cy in EMU); twoCellAnchor has
     // none (and the inner xfrm a:ext is namespace-disambiguated, so it won't match).
     const ext = parseExt(el);
-    if (!from) continue;
-    out.push({ from, to, ext, chartRelId });
+    out.push({ from, to, ext, abs: null, chartRelId });
   }
   return out;
+}
+
+function parseAbsBox(
+  el: Element,
+): { x: number; y: number; width: number; height: number } | null {
+  const pos = firstChildNS(el, NS.xdr, "pos");
+  const ext = firstChildNS(el, NS.xdr, "ext");
+  if (!pos || !ext) return null;
+  const x = parseInt(pos.getAttribute("x") ?? "", 10);
+  const y = parseInt(pos.getAttribute("y") ?? "", 10);
+  const cx = parseInt(ext.getAttribute("cx") ?? "", 10);
+  const cy = parseInt(ext.getAttribute("cy") ?? "", 10);
+  if (![x, y, cx, cy].every((n) => Number.isFinite(n)) || cx <= 0 || cy <= 0) return null;
+  return { x: x / EMU_PER_PX, y: y / EMU_PER_PX, width: cx / EMU_PER_PX, height: cy / EMU_PER_PX };
 }
 
 function parseExt(el: Element): { width: number; height: number } | null {

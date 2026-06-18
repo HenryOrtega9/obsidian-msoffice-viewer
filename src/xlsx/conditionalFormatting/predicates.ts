@@ -1,7 +1,7 @@
 import type ExcelJS from "exceljs";
 import type { MergeRect } from "../merges";
 import type { GridContext } from "../grid";
-import { mergeStyleIntoElement } from "./applyStyle";
+import { type CfLocks, lockSetFor, mergeStyleIntoElement } from "./applyStyle";
 import {
   collectNumericValues,
   forEachCellInRanges,
@@ -19,6 +19,7 @@ function applyMatching(
   style: Partial<ExcelJS.Style> | undefined,
   stopped: Set<string>,
   stopIfTrue: boolean,
+  locks: CfLocks,
   theme?: readonly string[],
 ): void {
   forEachCellInRanges(ranges, (r, c) => {
@@ -26,7 +27,7 @@ function applyMatching(
     if (stopped.has(key)) return;
     if (!predicate(r, c)) return;
     const td = ctx.cellMap.get(key);
-    if (td) mergeStyleIntoElement(td, style, theme);
+    if (td) mergeStyleIntoElement(td, style, theme, lockSetFor(locks, key));
     if (stopIfTrue) stopped.add(key);
   });
 }
@@ -38,6 +39,7 @@ export function applyCellIs(
   rule: { operator?: string; formulae?: unknown[]; style?: Partial<ExcelJS.Style> },
   stopped: Set<string>,
   stopIfTrue: boolean,
+  locks: CfLocks,
   theme?: readonly string[],
 ): void {
   const f = rule.formulae ?? [];
@@ -71,7 +73,7 @@ export function applyCellIs(
         return false;
     }
   };
-  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, theme);
+  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, locks, theme);
 }
 
 export function applyTop10(
@@ -81,6 +83,7 @@ export function applyTop10(
   rule: { rank?: number; percent?: boolean; bottom?: boolean; style?: Partial<ExcelJS.Style> },
   stopped: Set<string>,
   stopIfTrue: boolean,
+  locks: CfLocks,
   theme?: readonly string[],
 ): void {
   const values = collectNumericValues(ws, ranges);
@@ -96,7 +99,7 @@ export function applyTop10(
     if (v == null) return false;
     return rule.bottom ? v <= threshold : v >= threshold;
   };
-  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, theme);
+  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, locks, theme);
 }
 
 export function applyAboveAverage(
@@ -106,6 +109,7 @@ export function applyAboveAverage(
   rule: { aboveAverage?: boolean; style?: Partial<ExcelJS.Style> },
   stopped: Set<string>,
   stopIfTrue: boolean,
+  locks: CfLocks,
   theme?: readonly string[],
 ): void {
   const values = collectNumericValues(ws, ranges);
@@ -118,7 +122,7 @@ export function applyAboveAverage(
     if (v == null) return false;
     return above ? v > mean : v < mean;
   };
-  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, theme);
+  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, locks, theme);
 }
 
 export function applyContainsText(
@@ -134,6 +138,7 @@ export function applyContainsText(
   },
   stopped: Set<string>,
   stopIfTrue: boolean,
+  locks: CfLocks,
   theme?: readonly string[],
 ): void {
   // ExcelJS drops the OOXML @text attribute, so the needle survives only inside
@@ -168,7 +173,7 @@ export function applyContainsText(
         return needle !== "" && s.includes(needle);
     }
   };
-  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, theme);
+  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, locks, theme);
 }
 
 // Recover the search literal. For contains/notContains ExcelJS emits
@@ -207,6 +212,7 @@ export function applyTimePeriod(
   rule: { timePeriod?: string; style?: Partial<ExcelJS.Style> },
   stopped: Set<string>,
   stopIfTrue: boolean,
+  locks: CfLocks,
   theme?: readonly string[],
 ): void {
   const now = new Date();
@@ -233,7 +239,7 @@ export function applyTimePeriod(
       default: return false;
     }
   };
-  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, theme);
+  applyMatching(ws, ctx, ranges, predicate, rule.style, stopped, stopIfTrue, locks, theme);
 }
 
 function dayOfWeek(d: Date): number {

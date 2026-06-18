@@ -2,6 +2,7 @@ import type ExcelJS from "exceljs";
 import type { GridContext } from "../grid";
 import type { MergeRect } from "../merges";
 import { warn } from "../warn";
+import type { CfLocks } from "./applyStyle";
 import { parseCfRanges } from "./values";
 import { applyColorScale, applyDataBar, applyIconSet } from "./visuals";
 import {
@@ -51,28 +52,32 @@ export function applyConditionalFormatting(
   flat.sort((a, b) => (a.rule.priority ?? 1e9) - (b.rule.priority ?? 1e9));
 
   const stopped = new Set<string>();
+  // Per-cell per-property lock: rules apply highest-precedence first, so once a
+  // rule writes a property (fill/font) a lower-precedence rule can't overwrite
+  // it. Non-conflicting properties still stack across rules.
+  const locks: CfLocks = new Map();
 
   for (const { ranges, rule } of flat) {
     const stopIfTrue = rule.stopIfTrue === true;
     try {
       switch (rule.type) {
         case "colorScale":
-          applyColorScale(ws, ctx, ranges, rule as never, theme);
+          applyColorScale(ws, ctx, ranges, rule as never, locks, theme);
           break;
         case "dataBar":
-          applyDataBar(ws, ctx, ranges, rule as never, theme);
+          applyDataBar(ws, ctx, ranges, rule as never, locks, theme);
           break;
         case "iconSet":
           applyIconSet(ws, ctx, ranges, rule as never);
           break;
         case "cellIs":
-          applyCellIs(ws, ctx, ranges, rule as never, stopped, stopIfTrue, theme);
+          applyCellIs(ws, ctx, ranges, rule as never, stopped, stopIfTrue, locks, theme);
           break;
         case "top10":
-          applyTop10(ws, ctx, ranges, rule as never, stopped, stopIfTrue, theme);
+          applyTop10(ws, ctx, ranges, rule as never, stopped, stopIfTrue, locks, theme);
           break;
         case "aboveAverage":
-          applyAboveAverage(ws, ctx, ranges, rule as never, stopped, stopIfTrue, theme);
+          applyAboveAverage(ws, ctx, ranges, rule as never, stopped, stopIfTrue, locks, theme);
           break;
         case "containsText":
         case "notContainsText":
@@ -82,10 +87,10 @@ export function applyConditionalFormatting(
         case "notContainsBlanks":
         case "containsErrors":
         case "notContainsErrors":
-          applyContainsText(ws, ctx, ranges, rule as never, stopped, stopIfTrue, theme);
+          applyContainsText(ws, ctx, ranges, rule as never, stopped, stopIfTrue, locks, theme);
           break;
         case "timePeriod":
-          applyTimePeriod(ws, ctx, ranges, rule as never, stopped, stopIfTrue, theme);
+          applyTimePeriod(ws, ctx, ranges, rule as never, stopped, stopIfTrue, locks, theme);
           break;
         case "expression":
           warn("cf-expression", "formula evaluation unsupported", { ref: ranges });

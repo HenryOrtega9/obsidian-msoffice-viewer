@@ -2,6 +2,7 @@ import type ExcelJS from "exceljs";
 import type { MergeRect } from "../merges";
 import { ExcelColorRef, resolveExcelColor } from "../colors";
 import type { GridContext } from "../grid";
+import { type CfLocks, lockSetFor } from "./applyStyle";
 import {
   Cfvo,
   cfvoToNumber,
@@ -39,6 +40,7 @@ export function applyColorScale(
   ctx: GridContext,
   ranges: MergeRect[],
   rule: { cfvo?: Cfvo[]; color?: ExcelColorRef[] },
+  locks: CfLocks,
   theme?: readonly string[],
 ): void {
   const cfvo = rule.cfvo ?? [];
@@ -58,10 +60,14 @@ export function applyColorScale(
   forEachCellInRanges(ranges, (r, c) => {
     const v = numericCellValue(ws, r, c);
     if (v == null) return;
-    const td = ctx.cellMap.get(`${r}:${c}`);
+    const key = `${r}:${c}`;
+    const lk = lockSetFor(locks, key);
+    if (lk.has("background")) return; // a higher-precedence rule already filled it
+    const td = ctx.cellMap.get(key);
     if (!td) return;
     const color = interpolateScale(v, stops, rgbStops as RGB[]);
     td.style.backgroundColor = rgbToCss(color);
+    lk.add("background");
   });
 }
 
@@ -98,6 +104,7 @@ export function applyDataBar(
     maxLength?: number;
     axisPosition?: string;
   },
+  locks: CfLocks,
   theme?: readonly string[],
 ): void {
   const cfvo = rule.cfvo ?? [];
@@ -126,7 +133,10 @@ export function applyDataBar(
   forEachCellInRanges(ranges, (r, c) => {
     const v = numericCellValue(ws, r, c);
     if (v == null) return;
-    const td = ctx.cellMap.get(`${r}:${c}`);
+    const key = `${r}:${c}`;
+    const lk = lockSetFor(locks, key);
+    if (lk.has("background")) return; // higher-precedence solid fill / scale wins
+    const td = ctx.cellMap.get(key);
     if (!td) return;
 
     const frac = Math.max(0, Math.min(1, (v - min) / (max - min)));
@@ -145,6 +155,7 @@ export function applyDataBar(
       }
     }
     td.style.backgroundClip = "padding-box";
+    lk.add("background");
   });
 }
 
@@ -251,9 +262,13 @@ export function applyIconSet(
     td.prepend(span);
 
     if (rule.showValue === false) {
-      // Hide the underlying text but keep the icon.
+      // Hide ALL underlying value content but keep the icon. Text wrapped in a
+      // <span>/<a>/<sup> (rich text, hyperlinks, rotation) isn't a top-level
+      // text node, so transparent its color rather than only clearing bare text.
       for (const node of Array.from(td.childNodes)) {
-        if (node !== span && node.nodeType === 3) node.textContent = "";
+        if (node === span) continue;
+        if (node.nodeType === 3) node.textContent = "";
+        else (node as HTMLElement).style.color = "transparent";
       }
     }
   });

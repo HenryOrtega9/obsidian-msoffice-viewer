@@ -73,18 +73,24 @@ function extractRichTextRuns(cell: ExcelJS.Cell): RichTextRun[] | null {
 export function cellText(cell: ExcelJS.Cell): string {
   const raw = extractCellValue(cell);
   if (raw == null) return "";
-  if (typeof raw === "string") return raw;
   const fmt = cell.numFmt;
-  if (typeof raw === "boolean") {
-    // Workbooks can format booleans via custom codes ("Yes";"No"). Try the
-    // numfmt path first; fall back to plain TRUE/FALSE.
-    if (fmt && fmt !== "General") {
+  if (typeof raw === "string") {
+    // A custom format can carry a text section ('"prefix "@'), so route strings
+    // through numfmt for any non-General/non-'@' format. numfmt passes strings
+    // through numeric/date formats verbatim, so this never corrupts plain text.
+    if (fmt && fmt !== "General" && fmt !== "@") {
       try {
-        return numfmtFormat(fmt, raw ? 1 : 0);
+        return numfmtFormat(fmt, raw);
       } catch (e) {
-        warn("numfmt", e, { fmt, raw, kind: "boolean" });
+        warn("numfmt", e, { fmt, raw, kind: "string" });
       }
     }
+    return raw;
+  }
+  if (typeof raw === "boolean") {
+    // Excel ignores number-format sections on a literal boolean and shows
+    // TRUE/FALSE; running a 2-section custom format here mis-selected the
+    // positive section for FALSE.
     return raw ? "TRUE" : "FALSE";
   }
   if (raw instanceof Date) {

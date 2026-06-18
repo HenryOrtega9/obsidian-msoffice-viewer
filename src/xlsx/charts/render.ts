@@ -70,7 +70,16 @@ export function renderSheetCharts(
     }
     count++;
 
-    const box = anchorRangeToBox(placement.from, placement.to, placement.ext, ctx);
+    // absoluteAnchor charts are positioned independent of cells; offset by the
+    // row-header width and thead height so they land in the grid overlay space.
+    const box = placement.abs
+      ? {
+          left: ctx.rowHdrColPx + placement.abs.x,
+          top: ctx.theadEl.offsetHeight + placement.abs.y,
+          width: Math.max(1, placement.abs.width),
+          height: Math.max(1, placement.abs.height),
+        }
+      : anchorRangeToBox(placement.from, placement.to, placement.ext, ctx);
     const holder = layer.createDiv({ cls: "docx-claude-xlsx-chart-holder" });
     holder.style.left = `${box.left}px`;
     holder.style.top = `${box.top}px`;
@@ -140,17 +149,37 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
   };
 
   if (spec.kind === "scatter" || spec.kind === "bubble") {
+    // c:scatterStyle decides whether points are joined by a line. Excel's plain
+    // "Scatter" is marker-only (the default when absent).
+    const style = spec.scatterStyle ?? "marker";
+    const showLine =
+      spec.kind === "scatter" &&
+      (style === "line" || style === "lineMarker" || style === "smooth" || style === "smoothMarker");
+    const smooth = style === "smooth" || style === "smoothMarker";
+    const lineOnly = style === "line" || style === "smooth";
     return {
       type: cjsType,
       data: {
-        datasets: spec.series.map((s, i) => ({
-          label: s.name || `Series ${i + 1}`,
-          data: (s.points ?? []).map((p) => ({ x: p.x, y: p.y, ...(p.r != null ? { r: p.r } : {}) })),
-          backgroundColor: s.color ?? PALETTE[i % PALETTE.length],
-        })),
+        datasets: spec.series.map((s, i) => {
+          const color = s.color ?? PALETTE[i % PALETTE.length];
+          const ds: Record<string, unknown> = {
+            label: s.name || `Series ${i + 1}`,
+            data: (s.points ?? []).map((p) => ({ x: p.x, y: p.y, ...(p.r != null ? { r: p.r } : {}) })),
+            backgroundColor: color,
+          };
+          if (showLine) {
+            // Without an explicit borderColor chart.js draws the line in its
+            // near-transparent default; markers are hidden for line-only styles.
+            ds.showLine = true;
+            ds.borderColor = color;
+            if (smooth) ds.tension = 0.4;
+            if (lineOnly) ds.pointRadius = 0;
+          }
+          return ds;
+        }),
       },
       options: common,
-    } as ChartConfiguration;
+    } as unknown as ChartConfiguration;
   }
 
   const rawLabels = spec.series[0]?.categories ?? [];
@@ -168,7 +197,7 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
         }],
       },
       options: common,
-    } as ChartConfiguration;
+    } as unknown as ChartConfiguration;
   }
 
   // Synthesize Excel-style 1..n category labels when <c:cat> is absent, and pad
@@ -178,12 +207,18 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
   const labels = Array.from({ length: n }, (_, i) => rawLabels[i] ?? String(i + 1));
 
   const stacked = spec.stacked === true;
-  const fill = spec.kind === "area";
+  const baseFill = spec.kind === "area";
+  // Combo charts: a line/area series over a bar base gets its own right-hand
+  // axis so a small-scale series (e.g. a % line over absolute bars) stays
+  // visible instead of being flattened against the primary scale.
+  const hasSecondary = spec.series.some(
+    (s) => s.kind != null && s.kind !== spec.kind && (s.kind === "line" || s.kind === "area"),
+  );
   return {
     type: cjsType,
     data: {
       labels,
-      datasets: spec.series.map((s, i) => seriesDataset(s, i, fill)),
+      datasets: spec.series.map((s, i) => seriesDataset(s, i, spec.kind, baseFill)),
     },
     options: {
       ...common,
@@ -191,20 +226,36 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
       scales: {
         x: { stacked },
         y: { stacked },
+        ...(hasSecondary ? { y1: { position: "right", grid: { drawOnChartArea: false } } } : {}),
       },
     },
   } as unknown as ChartConfiguration;
 }
 
-function seriesDataset(s: ChartSeries, i: number, fill: boolean): Record<string, unknown> {
+function seriesDataset(
+  s: ChartSeries,
+  i: number,
+  baseKind: ChartKind,
+  baseFill: boolean,
+): Record<string, unknown> {
   const color = s.color ?? PALETTE[i % PALETTE.length];
-  return {
+  const differs = s.kind != null && s.kind !== baseKind;
+  const fill = differs ? s.kind === "area" : baseFill;
+  const ds: Record<string, unknown> = {
     label: s.name || `Series ${i + 1}`,
     data: s.values,
     backgroundColor: fill ? hexWithAlpha(color, 0.35) : color,
     borderColor: color,
     fill,
   };
+  // Mixed dataset: emit this series with its own chart.js type and, for a
+  // line/area over a non-line base, its own axis.
+  if (differs && s.kind) {
+    const t = mapType(s.kind);
+    if (t) ds.type = t;
+    if (s.kind === "line" || s.kind === "area") ds.yAxisID = "y1";
+  }
+  return ds;
 }
 
 function mapType(kind: ChartKind): ChartConfiguration["type"] | null {

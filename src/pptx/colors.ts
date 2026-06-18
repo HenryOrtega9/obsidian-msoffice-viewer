@@ -131,6 +131,14 @@ function schemeHex(name: string, theme: PptxTheme | null, clrMap: ClrMap): strin
   return scheme[n] ?? DEFAULT_SCHEME[n] ?? null;
 }
 
+// Apply the DrawingML color modifiers carried as children of a color element
+// (lumMod/lumOff/tint/shade/sat/hue) to a base "RRGGBB" hex. Shared with the
+// xlsx chart renderer so series scheme colors get the same transforms Excel
+// applies (e.g. accent1 lumMod 60% lumOff 40%).
+export function applyColorMods(hex6: string, colorEl: Element): string {
+  return applyMods(hex6, readMods(colorEl));
+}
+
 function applyMods(hex6: string, mods: ColorMods): string {
   let { r, g, b } = hexToRgb(hex6);
   if (mods.shade != null) {

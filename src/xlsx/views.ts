@@ -69,7 +69,7 @@ function resetScrollOffset(xml: string): string {
       .replace(/\btopLeftCell\s*=\s*"[^"]*"/g, 'topLeftCell="A1"')
       .replace(/\btopLeftCell\s*=\s*'[^']*'/g, 'topLeftCell="A1"');
   return xml.replace(
-    /<sheetView\b[^>]*\/>|<sheetView\b[^>]*>[\s\S]*?<\/sheetView>/g,
+    /<(?:[\w.-]+:)?sheetView\b[^>]*\/>|<(?:[\w.-]+:)?sheetView\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?sheetView>/g,
     zeroTopLeft,
   );
 }
