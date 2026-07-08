@@ -37,20 +37,25 @@ export class DocxPreviewSettingTab extends PluginSettingTab {
       .addText((text) => {
         text
           .setPlaceholder("100")
-          .setValue(String(Math.round(this.plugin.settings.defaultZoom * 100)))
-          .onChange(async (value) => {
-            const pct = Number.parseFloat(value);
-            if (!Number.isFinite(pct)) return;
-            const next = clampZoom(pct / 100);
-            this.plugin.settings.defaultZoom = next;
-            await this.plugin.saveSettings();
-            // Reflect any clamped value back into the field on blur so the
-            // user sees what was actually persisted (e.g., typing 1000 → 400).
-            const persistedPct = Math.round(next * 100);
-            if (persistedPct !== Math.round(pct)) {
-              text.inputEl.value = String(persistedPct);
-            }
-          });
+          .setValue(String(Math.round(this.plugin.settings.defaultZoom * 100)));
+        // Clamp, persist, and reflect ONLY on blur. Doing it in onChange fires
+        // per keystroke: typing "50" clamps the intermediate "5" to 25 and
+        // rewrites the field mid-typing, hijacking the input.
+        const commit = async (): Promise<void> => {
+          const pct = Number.parseFloat(text.inputEl.value);
+          if (!Number.isFinite(pct)) {
+            text.inputEl.value = String(Math.round(this.plugin.settings.defaultZoom * 100));
+            return;
+          }
+          const next = clampZoom(pct / 100);
+          this.plugin.settings.defaultZoom = next;
+          await this.plugin.saveSettings();
+          text.inputEl.value = String(Math.round(next * 100));
+        };
+        text.inputEl.addEventListener("blur", () => void commit());
+        text.inputEl.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") text.inputEl.blur();
+        });
       });
   }
 }

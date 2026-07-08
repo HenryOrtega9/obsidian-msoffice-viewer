@@ -182,8 +182,11 @@ export class CreateModal extends Modal {
       const file = await this.createWithCollisionRetry(folder, filename, buf);
 
       new Notice(`Created ${file.path}`);
-      this.close();
+      // Open BEFORE close(): close() sets aborted, and the catch below
+      // discards aborted-state errors — an openFile failure after close would
+      // vanish silently.
       await this.openFile(file);
+      this.close();
     } catch (e) {
       if (this.aborted) return;
       const msg =

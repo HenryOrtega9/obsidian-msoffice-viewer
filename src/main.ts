@@ -11,11 +11,13 @@ import {
   DocxPreviewSettings,
   clampZoom,
 } from "./settings";
+import { patchExcelJsDefaultNumFmts } from "./xlsx/numFmtPatch";
 
 export default class MsOfficeViewerPlugin extends Plugin {
   settings: DocxPreviewSettings = DEFAULT_SETTINGS;
 
   async onload(): Promise<void> {
+    patchExcelJsDefaultNumFmts();
     await this.loadSettings();
 
     OfficeFileView.pluginId = this.manifest.id;
@@ -74,18 +76,9 @@ export default class MsOfficeViewerPlugin extends Plugin {
     this.addSettingTab(new DocxPreviewSettingTab(this.app, this));
   }
 
-  onunload(): void {
-    // Obsidian unregisters view factories + commands. Leaves currently
-    // displaying our views need an explicit detach so they don't sit with a
-    // dead class reference until the next click.
-    for (const t of [
-      DOCX_CLAUDE_VIEW_TYPE,
-      PPTX_CLAUDE_VIEW_TYPE,
-      XLSX_CLAUDE_VIEW_TYPE,
-    ]) {
-      this.app.workspace.getLeavesOfType(t).forEach((leaf) => leaf.detach());
-    }
-  }
+  // No onunload leaf-detach: Obsidian's plugin guidelines forbid it. Detaching
+  // here permanently closes the user's open tabs on every plugin update;
+  // Obsidian re-adopts orphaned view types itself when the plugin reloads.
 
   private safeRegisterExtensions(exts: string[], viewType: string): void {
     try {

@@ -1,7 +1,7 @@
 import type ExcelJS from "exceljs";
 import type { MergeRect } from "../merges";
 import { colNum } from "../merges";
-import { extractCellValue } from "../cells";
+import { extractCellValue, excelDateToSerial } from "../cells";
 
 export interface Cfvo {
   type: string;
@@ -54,7 +54,9 @@ export function numericCellValue(ws: ExcelJS.Worksheet, row: number, col: number
   const cell = ws.getRow(row).getCell(col);
   const v = extractCellValue(cell);
   if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (v instanceof Date) return v.getTime();
+  // Excel compares dates as serial numbers (rule formulas like "45300" are
+  // serials), not epoch milliseconds.
+  if (v instanceof Date) return excelDateToSerial(v);
   return null;
 }
 
@@ -82,11 +84,15 @@ export function cfvoToNumber(
 ): number {
   switch (cfvo.type) {
     case "min":
-    case "autoMin":
       return min;
     case "max":
-    case "autoMax":
       return max;
+    // Excel's automatic data-bar bounds clamp through zero: all-positive data
+    // bars grow from 0, not from the smallest value.
+    case "autoMin":
+      return Math.min(0, min);
+    case "autoMax":
+      return Math.max(0, max);
     case "num":
       return cfvo.value ?? min;
     case "percent":

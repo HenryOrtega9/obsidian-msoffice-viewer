@@ -1,20 +1,23 @@
 import { NS, elementChildren } from "./ooxml";
 import { DEFAULT_SCHEME, type PptxTheme, type ClrMap } from "./themes";
 
-// DrawingML color modifiers. Percentage-typed values are stored as 0..1 factors
-// (OOXML carries them as thousandths of a percent, e.g. val="50000" => 0.5).
-// hueMod is likewise a 0..1 factor, but hueOff is a fixed angle (60000ths of a
-// degree) normalized here to turns (0..1) to match the 0..1 HSL hue scale.
-export interface ColorMods {
-  tint?: number;
-  shade?: number;
-  lumMod?: number;
-  lumOff?: number;
-  satMod?: number;
-  satOff?: number;
-  hueMod?: number;
-  hueOff?: number;
-  alpha?: number;
+// A DrawingML color modifier, kept in XML document order because the spec
+// applies transforms sequentially in the order authored. Percentage-typed
+// values arrive as thousandths of a percent (val="50000" => 0.5); hueOff is a
+// fixed angle (60000ths of a degree) normalized to turns to match the 0..1
+// HSL hue scale.
+export interface ColorMod {
+  kind:
+    | "tint"
+    | "shade"
+    | "lumMod"
+    | "lumOff"
+    | "satMod"
+    | "satOff"
+    | "hueMod"
+    | "hueOff"
+    | "alpha";
+  val: number;
 }
 
 // A DrawingML color reference: exactly one of srgb/scheme/sys/prst is set.
@@ -23,7 +26,7 @@ export interface DrawingMlColor {
   scheme?: string; // scheme name or role (accent1, tx1, bg1, phClr, ...)
   sys?: string; // resolved lastClr "RRGGBB"
   prst?: string; // preset color name
-  mods: ColorMods;
+  mods: ColorMod[];
 }
 
 // A small subset of DrawingML preset colors. Anything missing falls through to
@@ -76,53 +79,56 @@ export function parseColorChoice(parent: Element): DrawingMlColor | null {
   return null;
 }
 
-function readMods(colorEl: Element): ColorMods {
-  const mods: ColorMods = {};
+const MOD_NAMES = new Set([
+  "tint", "shade", "lumMod", "lumOff", "satMod", "satOff", "hueMod", "hueOff", "alpha",
+]);
+
+function readMods(colorEl: Element): ColorMod[] {
+  const mods: ColorMod[] = [];
   for (const m of elementChildren(colorEl)) {
-    if (m.namespaceURI !== NS.a) continue;
-    const v = parseInt(m.getAttribute("val") ?? "", 10);
-    if (Number.isNaN(v)) continue;
-    switch (m.localName) {
-      case "tint": mods.tint = v / 100000; break;
-      case "shade": mods.shade = v / 100000; break;
-      case "lumMod": mods.lumMod = v / 100000; break;
-      case "lumOff": mods.lumOff = v / 100000; break;
-      case "satMod": mods.satMod = v / 100000; break;
-      case "satOff": mods.satOff = v / 100000; break;
-      case "hueMod": mods.hueMod = v / 100000; break;
-      // hueOff is ST_FixedAngle (60000ths of a degree); normalize to turns
-      // (deg/360) so it adds onto the 0..1 hue scale used below.
-      case "hueOff": mods.hueOff = v / 21600000; break;
-      case "alpha": mods.alpha = v / 100000; break;
-    }
+    if (m.namespaceURI !== NS.a || !MOD_NAMES.has(m.localName)) continue;
+    const raw = parseInt(m.getAttribute("val") ?? "", 10);
+    if (Number.isNaN(raw)) continue;
+    const kind = m.localName as ColorMod["kind"];
+    // hueOff is ST_FixedAngle (60000ths of a degree); normalize to turns.
+    const val = kind === "hueOff" ? raw / 21600000 : raw / 100000;
+    mods.push({ kind, val });
   }
   return mods;
 }
 
 // Resolve a DrawingMlColor to a CSS color string, or null if unresolvable.
+// `phClr` supplies the substitution color ("RRGGBB") for scheme val="phClr"
+// references inside theme format-scheme style definitions.
 export function resolveDrawingMlColor(
   c: DrawingMlColor | null,
   theme: PptxTheme | null,
   clrMap: ClrMap,
+  phClr?: string | null,
 ): string | null {
   if (!c) return null;
   let hex6: string | null = null;
   if (c.srgb) hex6 = c.srgb;
   else if (c.sys) hex6 = c.sys;
-  else if (c.scheme) hex6 = schemeHex(c.scheme, theme, clrMap);
+  else if (c.scheme) hex6 = schemeHex(c.scheme, theme, clrMap, phClr);
   else if (c.prst) hex6 = PRESET[c.prst] ?? null;
   if (!hex6) return null;
 
-  hex6 = applyMods(hex6, c.mods);
-  if (c.mods.alpha != null && c.mods.alpha < 1) {
-    return hexToRgba(hex6, c.mods.alpha);
+  const { hex, alpha } = applyModList(hex6, c.mods);
+  if (alpha != null && alpha < 1) {
+    return hexToRgba(hex, alpha);
   }
-  return `#${hex6}`;
+  return `#${hex}`;
 }
 
 // Resolve a schemeClr val (scheme name or logical role) to a hex via clrMap.
-function schemeHex(name: string, theme: PptxTheme | null, clrMap: ClrMap): string | null {
-  if (name === "phClr") return null; // placeholder color: only meaningful inside a style def
+function schemeHex(
+  name: string,
+  theme: PptxTheme | null,
+  clrMap: ClrMap,
+  phClr?: string | null,
+): string | null {
+  if (name === "phClr") return phClr ?? null; // placeholder color from a style ref
   let n = name;
   if (n === "bg1" || n === "tx1" || n === "bg2" || n === "tx2") {
     n = clrMap[n] ?? n;
@@ -136,48 +142,55 @@ function schemeHex(name: string, theme: PptxTheme | null, clrMap: ClrMap): strin
 // xlsx chart renderer so series scheme colors get the same transforms Excel
 // applies (e.g. accent1 lumMod 60% lumOff 40%).
 export function applyColorMods(hex6: string, colorEl: Element): string {
-  return applyMods(hex6, readMods(colorEl));
+  return applyModList(hex6, readMods(colorEl)).hex;
 }
 
-function applyMods(hex6: string, mods: ColorMods): string {
+// sRGB <-> linear conversions (2.2 gamma approximation). Office applies
+// tint/shade in linear RGB, so doing it on gamma-encoded channels renders
+// shades markedly too dark and tints too light.
+function srgbToLinear(c255: number): number {
+  return Math.pow(Math.max(0, Math.min(255, c255)) / 255, 2.2);
+}
+
+function linearToSrgb(lin: number): number {
+  return Math.pow(Math.max(0, Math.min(1, lin)), 1 / 2.2) * 255;
+}
+
+// Apply modifiers sequentially in document order. HSL-typed mods convert to
+// HSL for that step only, so interleavings like shade->satMod->tint behave.
+function applyModList(hex6: string, mods: ColorMod[]): { hex: string; alpha: number | null } {
   let { r, g, b } = hexToRgb(hex6);
-  if (mods.shade != null) {
-    r *= mods.shade;
-    g *= mods.shade;
-    b *= mods.shade;
-  }
-  if (mods.tint != null) {
-    r = r * mods.tint + 255 * (1 - mods.tint);
-    g = g * mods.tint + 255 * (1 - mods.tint);
-    b = b * mods.tint + 255 * (1 - mods.tint);
-  }
-  // HSL modifiers, applied in fixed order hue -> sat -> lum. All operate on the
-  // 0..1 HSL scale (hue wraps into [0,1)).
-  if (
-    mods.hueMod != null ||
-    mods.hueOff != null ||
-    mods.satMod != null ||
-    mods.satOff != null ||
-    mods.lumMod != null ||
-    mods.lumOff != null
-  ) {
+  let alpha: number | null = null;
+
+  const inLinear = (f: (lin: number) => number): void => {
+    r = linearToSrgb(f(srgbToLinear(r)));
+    g = linearToSrgb(f(srgbToLinear(g)));
+    b = linearToSrgb(f(srgbToLinear(b)));
+  };
+  const inHsl = (f: (hsl: { h: number; s: number; l: number }) => void): void => {
     const hsl = rgbToHsl(r, g, b);
-    let h = hsl.h;
-    let s = hsl.s;
-    let l = hsl.l;
-    if (mods.hueMod != null) h *= mods.hueMod;
-    if (mods.hueOff != null) h += mods.hueOff;
-    h -= Math.floor(h); // wrap into [0,1)
-    if (mods.satMod != null) s *= mods.satMod;
-    if (mods.satOff != null) s += mods.satOff;
-    if (mods.lumMod != null) l *= mods.lumMod;
-    if (mods.lumOff != null) l += mods.lumOff;
-    const rgb = hslToRgb(h, clamp01(s), clamp01(l));
+    f(hsl);
+    hsl.h -= Math.floor(hsl.h); // wrap into [0,1)
+    const rgb = hslToRgb(hsl.h, clamp01(hsl.s), clamp01(hsl.l));
     r = rgb.r;
     g = rgb.g;
     b = rgb.b;
+  };
+
+  for (const m of mods) {
+    switch (m.kind) {
+      case "shade": inLinear((lin) => lin * m.val); break;
+      case "tint": inLinear((lin) => lin * m.val + (1 - m.val)); break;
+      case "hueMod": inHsl((hsl) => { hsl.h *= m.val; }); break;
+      case "hueOff": inHsl((hsl) => { hsl.h += m.val; }); break;
+      case "satMod": inHsl((hsl) => { hsl.s *= m.val; }); break;
+      case "satOff": inHsl((hsl) => { hsl.s += m.val; }); break;
+      case "lumMod": inHsl((hsl) => { hsl.l *= m.val; }); break;
+      case "lumOff": inHsl((hsl) => { hsl.l += m.val; }); break;
+      case "alpha": alpha = clamp01(m.val); break;
+    }
   }
-  return rgbToHex(r, g, b);
+  return { hex: rgbToHex(r, g, b), alpha };
 }
 
 function hexToRgb(hex6: string): { r: number; g: number; b: number } {

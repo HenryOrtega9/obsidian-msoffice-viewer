@@ -193,7 +193,8 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
         labels: rawLabels,
         datasets: [{
           data: s.values,
-          backgroundColor: s.values.map((_, i) => PALETTE[i % PALETTE.length]),
+          // Explicit c:dPt slice fills win; fall back to the Office palette.
+          backgroundColor: s.values.map((_, i) => s.pointColors?.[i] ?? PALETTE[i % PALETTE.length]),
         }],
       },
       options: common,
@@ -208,6 +209,11 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
 
   const stacked = spec.stacked === true;
   const baseFill = spec.kind === "area";
+  // chart.js has no native 100% stacking: normalize each category's values to
+  // percentages and pin the value axis to 0-100.
+  const seriesForData = spec.percentStacked
+    ? normalizeToPercent(spec.series)
+    : spec.series;
   // Combo charts: a line/area series over a bar base gets its own right-hand
   // axis so a small-scale series (e.g. a % line over absolute bars) stays
   // visible instead of being flattened against the primary scale.
@@ -218,18 +224,42 @@ export function buildConfig(spec: ChartSpec): ChartConfiguration | null {
     type: cjsType,
     data: {
       labels,
-      datasets: spec.series.map((s, i) => seriesDataset(s, i, spec.kind, baseFill)),
+      datasets: seriesForData.map((s, i) => seriesDataset(s, i, spec.kind, baseFill)),
     },
     options: {
       ...common,
       indexAxis: spec.barHorizontal ? "y" : "x",
       scales: {
-        x: { stacked },
-        y: { stacked },
+        x: { stacked, ...(spec.percentStacked && spec.barHorizontal ? pctAxis() : {}) },
+        y: { stacked, ...(spec.percentStacked && !spec.barHorizontal ? pctAxis() : {}) },
         ...(hasSecondary ? { y1: { position: "right", grid: { drawOnChartArea: false } } } : {}),
       },
     },
   } as unknown as ChartConfiguration;
+}
+
+function pctAxis(): Record<string, unknown> {
+  return {
+    min: 0,
+    max: 100,
+    ticks: { callback: (v: number | string) => `${v}%` },
+  };
+}
+
+// Rescale each category's values so the stack sums to 100 (Excel percent
+// stacking). Categories whose total is 0 keep nulls/zeros.
+function normalizeToPercent(series: ChartSeries[]): ChartSeries[] {
+  const n = Math.max(0, ...series.map((s) => s.values.length));
+  const totals = new Array<number>(n).fill(0);
+  for (const s of series) {
+    for (let i = 0; i < n; i++) totals[i] += Math.abs(s.values[i] ?? 0);
+  }
+  return series.map((s) => ({
+    ...s,
+    values: s.values.map((v, i) =>
+      v == null || totals[i] === 0 ? v : (Math.abs(v) / totals[i]) * 100,
+    ),
+  }));
 }
 
 function seriesDataset(

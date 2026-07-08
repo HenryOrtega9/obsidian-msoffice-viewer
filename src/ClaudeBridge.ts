@@ -53,10 +53,12 @@ export class ClaudeBridge {
       );
     });
     try {
-      return await Promise.race([
-        plugin.runHeadlessPrompt!(systemPrompt, userPrompt, opts),
-        timeout,
-      ]);
+      const call = plugin.runHeadlessPrompt!(systemPrompt, userPrompt, opts);
+      // If the timeout wins the race, the losing promise keeps running with no
+      // handler attached; absorb its eventual rejection so it doesn't surface
+      // as an unhandled rejection.
+      call.catch(() => {});
+      return await Promise.race([call, timeout]);
     } finally {
       if (timer) clearTimeout(timer);
     }

@@ -9,6 +9,11 @@ export interface PptxTheme {
   scheme: Record<string, string>; // name -> "RRGGBB"
   majorFont?: string; // a:fontScheme/a:majorFont latin typeface (+mj-lt)
   minorFont?: string; // a:fontScheme/a:minorFont latin typeface (+mn-lt)
+  // fmtScheme style lists, kept as raw elements so p:style fillRef/lnRef
+  // indices can be resolved against them (with phClr substitution).
+  fillStyles?: Element[]; // a:fmtScheme/a:fillStyleLst children
+  bgFillStyles?: Element[]; // a:fmtScheme/a:bgFillStyleLst children
+  lnStyles?: Element[]; // a:fmtScheme/a:lnStyleLst children
 }
 
 // p:clrMap maps logical roles (bg1, tx1, bg2, tx2, ...) onto scheme names.
@@ -76,7 +81,19 @@ function parseThemeDoc(doc: Document): PptxTheme | null {
     const hex = extractSchemeColor(node);
     if (hex) out[node.localName] = hex;
   }
-  return { scheme: out, majorFont: fontOf(doc, "majorFont"), minorFont: fontOf(doc, "minorFont") };
+  const fmt = doc.getElementsByTagNameNS(NS.a, "fmtScheme")[0] ?? null;
+  const styleList = (name: string): Element[] | undefined => {
+    const lst = fmt ? directChild(fmt, NS.a, name) : null;
+    return lst ? elementChildren(lst) : undefined;
+  };
+  return {
+    scheme: out,
+    majorFont: fontOf(doc, "majorFont"),
+    minorFont: fontOf(doc, "minorFont"),
+    fillStyles: styleList("fillStyleLst"),
+    bgFillStyles: styleList("bgFillStyleLst"),
+    lnStyles: styleList("lnStyleLst"),
+  };
 }
 
 function fontOf(doc: Document, which: string): string | undefined {
@@ -118,7 +135,9 @@ function readClrMapAttrs(el: Element, into: ClrMap): void {
 }
 
 // The effective color map is the master's clrMap, unless the slide (then the
-// layout) carries a p:clrMapOvr with an a:overrideClrMapping.
+// layout) carries a p:clrMapOvr with an a:overrideClrMapping. A slide-level
+// a:masterClrMapping means "no opinion here" — the layout's override (common on
+// dark section layouts that swap bg1/tx1) must still be consulted.
 export function resolveEffectiveClrMap(
   masterDoc: Document | null,
   layoutDoc: Document | null,
@@ -131,12 +150,12 @@ export function resolveEffectiveClrMap(
     if (!ovr) continue;
     const override = firstChildNS(ovr, NS.a, "overrideClrMapping");
     if (override) {
-      const map: ClrMap = { ...DEFAULT_CLR_MAP };
+      // Layer the override on top of the master's map so roles the override
+      // omits keep the master's remapping rather than the Office default.
+      const map: ClrMap = { ...base };
       readClrMapAttrs(override, map);
       return map;
     }
-    // a:masterClrMapping (or empty) means inherit the master's map.
-    return base;
   }
   return base;
 }

@@ -41,6 +41,7 @@ export function applyColorScale(
   ranges: MergeRect[],
   rule: { cfvo?: Cfvo[]; color?: ExcelColorRef[] },
   locks: CfLocks,
+  stopped: ReadonlySet<string>,
   theme?: readonly string[],
 ): void {
   const cfvo = rule.cfvo ?? [];
@@ -61,6 +62,7 @@ export function applyColorScale(
     const v = numericCellValue(ws, r, c);
     if (v == null) return;
     const key = `${r}:${c}`;
+    if (stopped.has(key)) return; // a stopIfTrue rule already matched this cell
     const lk = lockSetFor(locks, key);
     if (lk.has("background")) return; // a higher-precedence rule already filled it
     const td = ctx.cellMap.get(key);
@@ -105,6 +107,7 @@ export function applyDataBar(
     axisPosition?: string;
   },
   locks: CfLocks,
+  stopped: ReadonlySet<string>,
   theme?: readonly string[],
 ): void {
   const cfvo = rule.cfvo ?? [];
@@ -134,6 +137,7 @@ export function applyDataBar(
     const v = numericCellValue(ws, r, c);
     if (v == null) return;
     const key = `${r}:${c}`;
+    if (stopped.has(key)) return; // a stopIfTrue rule already matched this cell
     const lk = lockSetFor(locks, key);
     if (lk.has("background")) return; // higher-precedence solid fill / scale wins
     const td = ctx.cellMap.get(key);
@@ -227,6 +231,7 @@ export function applyIconSet(
   ctx: GridContext,
   ranges: MergeRect[],
   rule: { cfvo?: Cfvo[]; iconSet?: string; reverse?: boolean; showValue?: boolean },
+  stopped: ReadonlySet<string>,
 ): void {
   const name = rule.iconSet ?? "3TrafficLights1";
   if (name === "NoIcons") return;
@@ -244,6 +249,7 @@ export function applyIconSet(
   forEachCellInRanges(ranges, (r, c) => {
     const v = numericCellValue(ws, r, c);
     if (v == null) return;
+    if (stopped.has(`${r}:${c}`)) return; // a stopIfTrue rule already matched
     const td = ctx.cellMap.get(`${r}:${c}`);
     if (!td) return;
 

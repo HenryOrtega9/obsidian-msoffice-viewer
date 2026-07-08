@@ -20,6 +20,8 @@ export interface SlideRef {
   masterDoc: Document | null;
   themePath: string | null;
   rels: Map<string, string>; // id -> resolved zip path (images, charts)
+  layoutRels: Map<string, string>; // rels of the layout part (for its images)
+  masterRels: Map<string, string>; // rels of the master part
 }
 
 export interface PresentationPackage {
@@ -84,20 +86,33 @@ async function loadSlideRef(zip: JSZip, slidePath: string): Promise<SlideRef | n
   let layoutDoc: Document | null = null;
   let masterDoc: Document | null = null;
   let themePath: string | null = null;
+  let layoutRelMap = new Map<string, string>();
+  let masterRelMap = new Map<string, string>();
 
   const layoutPath = relTargetByType(slideRels, "/slideLayout");
   if (layoutPath) {
     layoutDoc = await readXml(zip, layoutPath);
     const layoutRels = await readRelsDetailed(zip, relsPathFor(layoutPath), dirOfSlide(layoutPath));
+    layoutRelMap = new Map(layoutRels.map((r) => [r.id, r.target]));
     const masterPath = relTargetByType(layoutRels, "/slideMaster");
     if (masterPath) {
       masterDoc = await readXml(zip, masterPath);
       const masterRels = await readRelsDetailed(zip, relsPathFor(masterPath), dirOfSlide(masterPath));
+      masterRelMap = new Map(masterRels.map((r) => [r.id, r.target]));
       themePath = relTargetByType(masterRels, "/theme");
     }
   }
 
-  return { slidePath, slideDoc, layoutDoc, masterDoc, themePath, rels };
+  return {
+    slidePath,
+    slideDoc,
+    layoutDoc,
+    masterDoc,
+    themePath,
+    rels,
+    layoutRels: layoutRelMap,
+    masterRels: masterRelMap,
+  };
 }
 
 function dirOfSlide(path: string): string {

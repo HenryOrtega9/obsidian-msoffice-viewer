@@ -1,6 +1,8 @@
 import { ChartKind, ChartSeries, ChartSpec } from "./types";
 import { NS, firstChildNS } from "./ooxml";
 import { applyColorMods } from "../../pptx/colors";
+import { format as numfmtFormat } from "numfmt";
+import { warn } from "../warn";
 
 const TYPE_TO_KIND: Record<string, ChartKind> = {
   barChart: "bar",
@@ -17,11 +19,13 @@ const TYPE_TO_KIND: Record<string, ChartKind> = {
   bubbleChart: "bubble",
 };
 
+// The theme array from xlsx/themes.ts is in Excel index order: 0=lt1, 1=dk1,
+// 2=lt2, 3=dk2, then accents. tx maps to dark, bg to light.
 const SCHEME_TO_THEME_INDEX: Record<string, number> = {
-  dk1: 0, tx1: 0,
-  lt1: 1, bg1: 1,
-  dk2: 2, tx2: 2,
-  lt2: 3, bg2: 3,
+  lt1: 0, bg1: 0,
+  dk1: 1, tx1: 1,
+  lt2: 2, bg2: 2,
+  dk2: 3, tx2: 3,
   accent1: 4, accent2: 5, accent3: 6, accent4: 7, accent5: 8, accent6: 9,
   hlink: 10, folHlink: 11,
 };
@@ -57,6 +61,7 @@ export function parseChartXml(doc: Document, theme?: readonly string[]): ChartSp
   if (primaryKind === "bar" || primaryKind === "line" || primaryKind === "area") {
     const grouping = attrVal(firstChildNS(primaryEl, NS.c, "grouping"));
     spec.stacked = grouping === "stacked" || grouping === "percentStacked";
+    spec.percentStacked = grouping === "percentStacked";
   }
   if (primaryKind === "scatter") {
     spec.scatterStyle = attrVal(firstChildNS(primaryEl, NS.c, "scatterStyle")) ?? undefined;
@@ -77,6 +82,7 @@ export function parseChartXml(doc: Document, theme?: readonly string[]): ChartSp
       const series = isXY ? parseXYSeries(ser, kind) : parseCategorySeries(ser);
       if (!series) continue;
       series.color = parseSeriesColor(ser, kind, theme);
+      series.pointColors = parsePointColors(ser, theme);
       series.kind = kind;
       spec.series.push(series);
     }
@@ -125,10 +131,28 @@ function parseCategorySeries(ser: Element): ChartSeries | null {
   const name = parseSeriesName(ser);
   const cat = firstChildNS(ser, NS.c, "cat");
   const val = firstChildNS(ser, NS.c, "val");
-  const categories = cat ? cachePoints(cat) : [];
+  const categories = cat ? formatCategories(cat, cachePoints(cat)) : [];
   const values = (val ? cachePoints(val) : []).map(toNum);
   if (values.length === 0) return null;
   return { name, categories, values };
+}
+
+// Date/number category caches carry raw serials plus a c:formatCode; without
+// applying it, a date axis shows "45292" instead of "Jan-24".
+function formatCategories(catEl: Element, raw: string[]): string[] {
+  const fcEl = firstChildNS(catEl, NS.c, "formatCode");
+  const fc = fcEl?.textContent?.trim();
+  if (!fc || fc === "General" || fc === "@") return raw;
+  return raw.map((s) => {
+    const n = parseFloat(s);
+    if (!Number.isFinite(n)) return s;
+    try {
+      return numfmtFormat(fc, n);
+    } catch (e) {
+      warn("chart-cat-fmt", e, { fc, s });
+      return s;
+    }
+  });
 }
 
 function parseXYSeries(ser: Element, kind: ChartKind): ChartSeries | null {
@@ -208,8 +232,10 @@ function parseSeriesColor(
   } else {
     solidFill = firstDirectChildNS(spPr, NS.a, "solidFill");
   }
-  if (!solidFill) return undefined;
+  return solidFill ? solidFillHex(solidFill, theme) : undefined;
+}
 
+function solidFillHex(solidFill: Element, theme?: readonly string[]): string | undefined {
   const srgb = firstDirectChildNS(solidFill, NS.a, "srgbClr");
   if (srgb) {
     const val = srgb.getAttribute("val");
@@ -221,6 +247,26 @@ function parseSeriesColor(
     if (idx !== undefined && theme[idx]) return `#${applyColorMods(theme[idx], scheme)}`;
   }
   return undefined;
+}
+
+// Explicit per-point fills (c:dPt > c:spPr > a:solidFill), keyed by c:idx.
+// Pie/doughnut slices are colored this way when the user picks slice colors.
+function parsePointColors(
+  ser: Element,
+  theme?: readonly string[],
+): (string | undefined)[] | undefined {
+  const dPts = childrenNS(ser, NS.c, "dPt");
+  if (dPts.length === 0) return undefined;
+  const out: (string | undefined)[] = [];
+  for (const dPt of dPts) {
+    const idxEl = firstDirectChildNS(dPt, NS.c, "idx");
+    const idx = parseInt(idxEl?.getAttribute("val") ?? "-1", 10);
+    if (idx < 0) continue;
+    const spPr = firstDirectChildNS(dPt, NS.c, "spPr");
+    const solid = spPr ? firstDirectChildNS(spPr, NS.a, "solidFill") : null;
+    if (solid) out[idx] = solidFillHex(solid, theme);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function childrenNS(parent: Element, ns: string, local: string): Element[] {

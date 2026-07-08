@@ -70,6 +70,9 @@ export class PptxPreviewView extends OfficeFileView {
     if (sofficeBin) {
       try {
         await this.renderViaLibreOfficePdf(file, sofficeBin, "pptx");
+        // renderViaLibreOfficePdf returns silently when stale; don't stamp the
+        // engine badge onto whatever file the view shows now.
+        if (this.file !== file) return;
         this.setEngineLabel("LibreOffice");
         return;
       } catch (e) {
@@ -99,7 +102,19 @@ export class PptxPreviewView extends OfficeFileView {
       );
     }
     this.setEngineLabel("Built-in");
-    await this.renderViaPptxViewJS(file);
+    try {
+      await this.renderViaPptxViewJS(file);
+    } catch (e) {
+      // Last tier: surface the failure instead of leaving a blank pane with an
+      // unhandled rejection (e.g. a corrupt zip fails JSZip.loadAsync).
+      console.error("pptxviewjs fallback failed:", e);
+      if (this.file !== file || !this.renderEl) return;
+      this.renderEl.empty();
+      this.renderEl.createDiv({
+        cls: "docx-claude-pdf-error",
+        text: "Could not render this .pptx file. It may be corrupt. Use Open in PowerPoint instead.",
+      });
+    }
   }
 
   private async renderViaNative(file: TFile): Promise<void> {
@@ -228,12 +243,14 @@ function extractTextRuns(xml: string): string[] {
 }
 
 function decodeXmlEntities(s: string): string {
+  // &amp; must decode LAST or "&amp;lt;" double-decodes to "<".
+  // fromCodePoint handles astral chars (emoji) that fromCharCode corrupts.
   return s
-    .replace(/&amp;/g, "&")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    .replace(/&amp;/g, "&");
 }

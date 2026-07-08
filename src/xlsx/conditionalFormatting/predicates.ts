@@ -2,6 +2,7 @@ import type ExcelJS from "exceljs";
 import type { MergeRect } from "../merges";
 import type { GridContext } from "../grid";
 import { type CfLocks, lockSetFor, mergeStyleIntoElement } from "./applyStyle";
+import { extractCellValue } from "../cells";
 import {
   collectNumericValues,
   forEachCellInRanges,
@@ -52,7 +53,8 @@ export function applyCellIs(
     switch (rule.operator) {
       case "equal":
         if (n != null && a != null) return n === a;
-        return stringCellValue(ws, r, c) === aStr;
+        // Excel's CF text equality is case-insensitive.
+        return stringCellValue(ws, r, c).toLowerCase() === aStr.toLowerCase();
       case "greaterThan":
         return n != null && a != null && n > a;
       case "lessThan":
@@ -68,7 +70,7 @@ export function applyCellIs(
       case "notEqual":
         // Negate equal's two-tier logic so text cells compare as strings too.
         if (n != null && a != null) return n !== a;
-        return stringCellValue(ws, r, c) !== aStr;
+        return stringCellValue(ws, r, c).toLowerCase() !== aStr.toLowerCase();
       default:
         return false;
     }
@@ -216,15 +218,19 @@ export function applyTimePeriod(
   theme?: readonly string[],
 ): void {
   const now = new Date();
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const today = startOfDay(now);
   const day = 86400000;
+  // ExcelJS dates are pure-UTC serial conversions, so read the CELL's calendar
+  // date from UTC components; "today" is the user's local calendar date. Using
+  // local components on the cell date shifts every serial a day early in
+  // negative-UTC-offset timezones.
+  const cellDay = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
 
   const predicate: Predicate = (r, c) => {
-    const cell = ws.getRow(r).getCell(c);
-    const v = cell.value;
+    // Unwrap via extractCellValue so formula cells with Date results match too.
+    const v = extractCellValue(ws.getRow(r).getCell(c));
     if (!(v instanceof Date)) return false;
-    const t = startOfDay(v);
+    const t = cellDay(v);
     switch (rule.timePeriod) {
       case "today": return t === today;
       case "yesterday": return t === today - day;
@@ -250,8 +256,9 @@ function addMonths(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth() + n, 1);
 }
 
-function sameMonth(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+// `cell` is a UTC-based ExcelJS date; `local` is a local-calendar reference.
+function sameMonth(cell: Date, local: Date): boolean {
+  return cell.getUTCFullYear() === local.getFullYear() && cell.getUTCMonth() === local.getMonth();
 }
 
 function toNum(x: unknown): number | null {

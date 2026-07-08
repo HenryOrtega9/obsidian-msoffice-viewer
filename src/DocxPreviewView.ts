@@ -13,7 +13,7 @@ type RenderMode = "html" | "pdf";
 export class DocxPreviewView extends OfficeFileView {
   private sofficeAvailable = false;
   private renderMode: RenderMode = "html";
-  // Sticky manual override; null means auto-route by content. Reset on file
+  // Sticky manual override; null means the PDF-first default. Reset on file
   // switch (onLoadFile) but preserved across toggle-triggered re-renders.
   private userForcedMode: RenderMode | null = null;
   private toggleBtn: HTMLButtonElement | null = null;
@@ -51,7 +51,16 @@ export class DocxPreviewView extends OfficeFileView {
     this.cancelActivePdfRender();
     this.renderEl.empty();
 
-    const buf = await this.app.vault.readBinary(file);
+    let buf: ArrayBuffer;
+    try {
+      buf = await this.app.vault.readBinary(file);
+    } catch (e) {
+      // Surface a read failure instead of an unhandled rejection + blank pane
+      // (e.g. the file was deleted between the click and the read).
+      warn("read", e, { file: file.path });
+      if (this.file === file) this.showError(false);
+      return;
+    }
     if (this.file !== file || !this.renderEl) return;
 
     // LibreOffice → PDF is the high-fidelity default: it renders through the
@@ -63,13 +72,13 @@ export class DocxPreviewView extends OfficeFileView {
       if (await this.tryRenderPdf(file)) return;
       if (this.file !== file || !this.renderEl) return;
       this.renderEl.empty();
-      if (await this.tryRenderHtml(buf)) return;
+      if (await this.tryRenderHtml(buf, file)) return;
       this.showError(!this.sofficeAvailable);
       return;
     }
 
     // Manual override to the selectable text renderer; PDF rescues if it fails.
-    if (await this.tryRenderHtml(buf)) return;
+    if (await this.tryRenderHtml(buf, file)) return;
     if (this.file !== file || !this.renderEl) return;
     this.renderEl.empty();
     if (await this.tryRenderPdf(file)) return;
@@ -77,12 +86,14 @@ export class DocxPreviewView extends OfficeFileView {
   }
 
   // Render with docx-preview. Returns false (so the caller can fall back) when
-  // it throws or produces an empty wrapper.
-  private async tryRenderHtml(buf: ArrayBuffer): Promise<boolean> {
+  // it throws or produces an empty wrapper. `file` guards against the view
+  // having moved on to another file while renderAsync was in flight — without
+  // it, a stale render inspects the NEW file's DOM and stamps the wrong mode.
+  private async tryRenderHtml(buf: ArrayBuffer, file: TFile): Promise<boolean> {
     if (!this.renderEl) return false;
     try {
       await renderAsync(buf, this.renderEl, this.renderEl, buildDocxOptions());
-      if (!this.renderEl) return false;
+      if (this.file !== file || !this.renderEl) return false;
       if (isRenderEmpty(this.renderEl)) {
         warn("render-empty", null, { file: this.file?.path });
         return false;
@@ -107,6 +118,9 @@ export class DocxPreviewView extends OfficeFileView {
     this.renderEl.empty();
     try {
       await this.renderViaLibreOfficePdf(file, soffice, "docx");
+      // renderViaLibreOfficePdf returns silently when stale; don't stamp the
+      // toggle/mode onto the file the view shows now.
+      if (this.file !== file) return false;
       this.renderMode = "pdf";
       this.updateToggleLabel();
       return true;

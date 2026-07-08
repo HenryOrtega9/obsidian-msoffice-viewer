@@ -248,6 +248,15 @@
 
 .docx-claude-pptx-p {
   margin: 0;
+  /* Preserve authored runs of spaces (manually aligned text) while wrapping. */
+  white-space: pre-wrap;
+}
+
+/* Group wrapper: positions a p:grpSp's children together so the group's
+   rotate/flip transform applies to all of them at once. */
+.docx-claude-pptx-group {
+  position: absolute;
+  box-sizing: border-box;
 }
 
 .docx-claude-pptx-image {
@@ -408,6 +417,41 @@
   white-space: nowrap;
   color: #1f1f1f;
   background: #ffffff;
+  /* Excel's default vertical alignment is bottom (tables default to middle). */
+  vertical-align: bottom;
+}
+
+/* Sheets saved with gridlines off: drop the default gridline borders; explicit
+   cell borders still apply via inline styles. */
+.docx-claude-xlsx-table.docx-claude-xlsx-no-gridlines th,
+.docx-claude-xlsx-table.docx-claude-xlsx-no-gridlines td {
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+
+/* Hidden rows must truly collapse to 0px or every overlay (charts, images,
+   frozen panes) positioned from cumulative row heights drifts. tr height acts
+   only as a minimum; padding/line-height must be zeroed too. */
+.docx-claude-xlsx-table tr.docx-claude-xlsx-hidden-row td,
+.docx-claude-xlsx-table tr.docx-claude-xlsx-hidden-row th {
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+  line-height: 0;
+  font-size: 0;
+  height: 0;
+  max-height: 0;
+  overflow: hidden;
+}
+
+.docx-claude-xlsx-table td.docx-claude-xlsx-hidden-col,
+.docx-claude-xlsx-table th.docx-claude-xlsx-hidden-col {
+  padding-left: 0;
+  padding-right: 0;
+  border-right: none;
+  font-size: 0;
+  max-width: 0;
+  overflow: hidden;
 }
 
 /* Sticky column-letter row (A, B, C…). Sticks to the top while you scroll

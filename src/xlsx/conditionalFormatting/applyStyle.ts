@@ -39,7 +39,18 @@ export function mergeStyleIntoElement(
   if (font) {
     if (font.bold) write("fontWeight", () => (td.style.fontWeight = "bold"));
     if (font.italic) write("fontStyle", () => (td.style.fontStyle = "italic"));
-    if (font.underline) write("textDecoration", () => (td.style.textDecoration = "underline"));
+    // Merge with any decoration the base cell style already set (a bare
+    // assignment clobbers an existing line-through/underline).
+    if (font.underline || font.strike) {
+      write("textDecoration", () => {
+        const existing = td.style.textDecoration
+          .split(/\s+/)
+          .filter((t) => t && t !== "none");
+        if (font.underline && !existing.includes("underline")) existing.push("underline");
+        if (font.strike && !existing.includes("line-through")) existing.push("line-through");
+        td.style.textDecoration = existing.join(" ");
+      });
+    }
     const c = resolveExcelColor(font.color as ExcelColorRef | undefined, theme);
     if (c) write("color", () => (td.style.color = c));
   }
@@ -50,5 +61,26 @@ export function mergeStyleIntoElement(
     const bg = (fill as { bgColor?: ExcelColorRef }).bgColor;
     const c = resolveExcelColor(fg, theme) ?? resolveExcelColor(bg, theme);
     if (c) write("background", () => (td.style.backgroundColor = c));
+  }
+
+  const border = style.border as Partial<ExcelJS.Borders> | undefined;
+  if (border) {
+    const sideCss = (b: Partial<ExcelJS.Border> | undefined): string | null => {
+      if (!b?.style) return null;
+      const color = resolveExcelColor(b.color as ExcelColorRef | undefined, theme) ?? "#000000";
+      const width = b.style === "medium" ? "2px" : b.style === "thick" ? "3px" : "1px";
+      return `${width} solid ${color}`;
+    };
+    const sides: ["top" | "bottom" | "left" | "right", string][] = [
+      ["top", "borderTop"], ["bottom", "borderBottom"], ["left", "borderLeft"], ["right", "borderRight"],
+    ];
+    for (const [side, prop] of sides) {
+      const css = sideCss(border[side]);
+      if (css) {
+        write(`border-${side}`, () => {
+          (td.style as unknown as Record<string, string>)[prop] = css;
+        });
+      }
+    }
   }
 }

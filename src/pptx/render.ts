@@ -1,5 +1,6 @@
 import type { Chart } from "chart.js";
 import { loadPresentation } from "./presentation";
+import { readXml } from "./ooxml";
 import { loadPresentationTheme, resolveEffectiveClrMap, type PptxTheme } from "./themes";
 import { slideScaleFor } from "./geometry";
 import { renderSlide } from "./slide";
@@ -36,6 +37,7 @@ export async function renderDeckNatively(
   const objectUrls: string[] = [];
   const charts: Chart[] = [];
   const themeCache = new Map<string, PptxTheme | null>();
+  const tableStyles = await readXml(pkg.zip, "ppt/tableStyles.xml");
   let rendered = 0;
 
   for (const slideRef of pkg.slides) {
@@ -44,7 +46,7 @@ export async function renderDeckNatively(
     if (opts.isStale?.()) break;
     const clrMap = resolveEffectiveClrMap(slideRef.masterDoc, slideRef.layoutDoc, slideRef.slideDoc);
     try {
-      await renderSlide(slideRef, theme, clrMap, scale, stage, pkg.zip, objectUrls, charts);
+      await renderSlide(slideRef, theme, clrMap, scale, stage, pkg.zip, objectUrls, charts, tableStyles);
       rendered++;
     } catch (e) {
       warn("slide-render", e, { slide: slideRef.slidePath });

@@ -62,13 +62,13 @@ export function applyConditionalFormatting(
     try {
       switch (rule.type) {
         case "colorScale":
-          applyColorScale(ws, ctx, ranges, rule as never, locks, theme);
+          applyColorScale(ws, ctx, ranges, rule as never, locks, stopped, theme);
           break;
         case "dataBar":
-          applyDataBar(ws, ctx, ranges, rule as never, locks, theme);
+          applyDataBar(ws, ctx, ranges, rule as never, locks, stopped, theme);
           break;
         case "iconSet":
-          applyIconSet(ws, ctx, ranges, rule as never);
+          applyIconSet(ws, ctx, ranges, rule as never, stopped);
           break;
         case "cellIs":
           applyCellIs(ws, ctx, ranges, rule as never, stopped, stopIfTrue, locks, theme);

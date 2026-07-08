@@ -24,6 +24,8 @@ export interface ChartSeries {
   values: (number | null)[];
   points?: ChartPoint[]; // for scatter / bubble
   color?: string;
+  // Explicit per-point fills (c:dPt), used by pie/doughnut slices.
+  pointColors?: (string | undefined)[];
   // Per-series chart kind, set for combo charts so the renderer can emit a
   // mixed dataset (e.g. a line over bars). Matches the primary kind otherwise.
   kind?: ChartKind;
@@ -34,6 +36,8 @@ export interface ChartSpec {
   rawType?: string; // OOXML element name when unsupported
   barHorizontal?: boolean;
   stacked?: boolean;
+  // 100% stacking: values are normalized to per-category percentages.
+  percentStacked?: boolean;
   title?: string;
   scatterStyle?: string; // c:scatterStyle val: marker|line|lineMarker|smooth|smoothMarker
   series: ChartSeries[];

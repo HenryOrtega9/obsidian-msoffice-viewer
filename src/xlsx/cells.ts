@@ -94,7 +94,7 @@ export function cellText(cell: ExcelJS.Cell): string {
     return raw ? "TRUE" : "FALSE";
   }
   if (raw instanceof Date) {
-    const serial = excelDateToSerial(cell, raw);
+    const serial = excelDateToSerial(raw);
     if (fmt && fmt !== "General") {
       try {
         return numfmtFormat(fmt, serial);
@@ -148,14 +148,12 @@ function adjustSerialForDate1904(
 // numfmt.dateToSerial uses a 1899-12-31 epoch that disagrees with ExcelJS's
 // 1899-12-30 epoch for day-fraction/elapsed serials, which made [h]:mm times
 // render ~24h short and go negative; 25569 is the day count from 1899-12-30 to
-// the Unix epoch. date1904 collapses into this helper, so the Date path no
-// longer needs adjustSerialForDate1904 (that still covers raw numeric serials).
-function excelDateToSerial(cell: ExcelJS.Cell, d: Date): number {
-  const wb = cell.worksheet?.workbook as
-    | { properties?: { date1904?: boolean } }
-    | undefined;
-  const date1904 = wb?.properties?.date1904 === true;
-  return 25569 + d.getTime() / 86400000 - (date1904 ? DATE_1904_OFFSET : 0);
+// the Unix epoch. No date1904 term here: ExcelJS's excelToDate already adds
+// the 1462-day offset when building the JS Date, so this expression is the
+// correct 1900-system serial for BOTH date systems (subtracting the offset
+// again shifted every Date cell in a 1904 workbook back four years).
+export function excelDateToSerial(d: Date): number {
+  return 25569 + d.getTime() / 86400000;
 }
 
 // A number format can carry a section color ("[Red]") or conditional-section
@@ -169,7 +167,7 @@ export function numberFormatColor(cell: ExcelJS.Cell): string | null {
   const raw = extractCellValue(cell);
   let serial: number;
   if (typeof raw === "number") serial = raw;
-  else if (raw instanceof Date) serial = excelDateToSerial(cell, raw);
+  else if (raw instanceof Date) serial = excelDateToSerial(raw);
   else return null;
   try {
     const color = numfmtFormatColor(fmt, serial, { indexColors: true, throws: false });
@@ -294,6 +292,12 @@ export function cellInlineStyle(cell: ExcelJS.Cell, theme?: readonly string[]): 
   }
 
   const align = cell.alignment as Partial<ExcelJS.Alignment> | undefined;
+  // Excel's General horizontal alignment is type-driven: numbers and dates
+  // right-align, booleans and errors center. Only explicit alignment overrides.
+  if (!align?.horizontal) {
+    const defAlign = defaultHorizontalAlign(cell);
+    if (defAlign) parts.push(`text-align: ${defAlign}`);
+  }
   if (align) {
     if (align.horizontal) parts.push(`text-align: ${align.horizontal}`);
     if (align.vertical) {
@@ -318,6 +322,15 @@ export function cellInlineStyle(cell: ExcelJS.Cell, theme?: readonly string[]): 
   }
 
   return parts.join("; ");
+}
+
+function defaultHorizontalAlign(cell: ExcelJS.Cell): string | null {
+  const v = cell.value;
+  const isError = !!v && typeof v === "object" && "error" in (v as unknown as Record<string, unknown>);
+  const raw = extractCellValue(cell);
+  if (isError || typeof raw === "boolean") return "center";
+  if (typeof raw === "number" || raw instanceof Date) return "right";
+  return null;
 }
 
 function quoteFont(name: string): string {
@@ -460,6 +473,20 @@ const BORDER_STYLE_CSS: Record<string, { width: string; css: string }> = {
   thick: { width: "3px", css: "solid" },
   double: { width: "3px", css: "double" },
 };
+
+// CSS for one border side of a cell, or null if that side has no border.
+// Used to composite a merged region's outline from its edge cells (Excel draws
+// the merge's right/bottom border from the bottom-right cell's style, which
+// the anchor-only rendering would otherwise drop).
+export function cellBorderSideCss(
+  cell: ExcelJS.Cell,
+  side: "top" | "bottom" | "left" | "right",
+  theme?: readonly string[],
+): string | null {
+  const border = cell.border as Partial<ExcelJS.Borders> | undefined;
+  const b = border?.[side];
+  return b?.style ? borderCss(b, theme) : null;
+}
 
 function borderCss(b: Partial<ExcelJS.Border>, theme?: readonly string[]): string {
   const style = b.style ?? "thin";

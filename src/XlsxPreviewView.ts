@@ -259,8 +259,11 @@ export class XlsxPreviewView extends OfficeFileView {
       loadWorkbookTheme(buf),
     ]);
     if (this.file !== file || !this.renderEl) return;
-    this.chartMap = await loadWorkbookCharts(buf, theme ?? undefined);
+    // Land the result in a local first: assigning the instance field before the
+    // freshness check would let a stale slow parse clobber the next file's map.
+    const charts = await loadWorkbookCharts(buf, theme ?? undefined);
     if (this.file !== file || !this.renderEl) return;
+    this.chartMap = charts;
     this.workbook = wb;
     this.theme = theme;
 
@@ -406,6 +409,12 @@ export class XlsxPreviewView extends OfficeFileView {
     } catch (e) {
       console.error("LibreOffice fallback failed:", e);
       new Notice("LibreOffice rendering failed. See console for details.");
+      // The grid was torn down before converting and the loading div is still
+      // up; re-render instead of leaving a dead "Rendering..." pane.
+      if (this.file === file && this.renderEl) {
+        this.renderEl.empty();
+        await this.renderFile(file);
+      }
     }
   }
 

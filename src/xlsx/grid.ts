@@ -1,6 +1,6 @@
 import { Notice } from "obsidian";
 import type ExcelJS from "exceljs";
-import { renderCellInto } from "./cells";
+import { renderCellInto, cellBorderSideCss } from "./cells";
 import {
   MergeRect,
   collectMerges,
@@ -142,6 +142,9 @@ export function renderSheetIntoGrid(
   // be absolutely positioned within the table's full (scrollable) bounds.
   const sheetWrap = container.createDiv({ cls: "docx-claude-xlsx-sheet-wrap" });
   const table = sheetWrap.createEl("table", { cls: "docx-claude-xlsx-table" });
+  // Sheets saved with gridlines off shouldn't get the default gridline borders.
+  const view0 = ws.views?.[0] as { showGridLines?: boolean } | undefined;
+  if (view0?.showGridLines === false) table.addClass("docx-claude-xlsx-no-gridlines");
 
   const colgroup = table.createEl("colgroup");
   colgroup.createEl("col", { cls: "docx-claude-xlsx-rowhdr-col" });
@@ -156,6 +159,7 @@ export function renderSheetIntoGrid(
       ? storedWidthToPx(sheetDefaultColWidth)
       : DEFAULT_COL_WIDTH_PX;
 
+  const hiddenCols = new Set<number>();
   const cumulativeColPx: number[] = [0]; // cumulativeColPx[0] = 0 (offset before col 1)
   for (let c = 1; c <= lastCol; c++) {
     const col = ws.getColumn(c);
@@ -170,16 +174,18 @@ export function renderSheetIntoGrid(
     const colEl = colgroup.createEl("col");
     colEl.setAttribute("style", `width: ${widthPx}px`);
     cumulativeColPx.push(cumulativeColPx[c - 1] + widthPx);
+    if (col.hidden) hiddenCols.add(c);
   }
 
   const thead = table.createEl("thead");
   const hdrRow = thead.createEl("tr");
   hdrRow.createEl("th", { cls: "docx-claude-xlsx-corner" });
   for (let c = 1; c <= lastCol; c++) {
-    hdrRow.createEl("th", {
+    const th = hdrRow.createEl("th", {
       cls: "docx-claude-xlsx-colhdr",
       text: colLetter(c),
     });
+    if (hiddenCols.has(c)) th.addClass("docx-claude-xlsx-hidden-col");
   }
 
   // Sheet default row height (points) when present, else the 15pt-derived
@@ -203,6 +209,9 @@ export function renderSheetIntoGrid(
     let heightPx: number;
     if (row.hidden || row.height === 0) {
       heightPx = 0;
+      // tr height is only a minimum; the class zeroes padding/borders/line
+      // height so the row truly collapses and overlay offsets stay aligned.
+      tr.addClass("docx-claude-xlsx-hidden-row");
     } else if (row.height == null) {
       heightPx = defaultRowPx;
     } else {
@@ -222,6 +231,7 @@ export function renderSheetIntoGrid(
       if (skipMap.has(key)) continue;
       const cell = row.getCell(c);
       const td = tr.createEl("td", { cls: "docx-claude-xlsx-cell" });
+      if (hiddenCols.has(c)) td.addClass("docx-claude-xlsx-hidden-col");
       const merge = mergeAnchor.get(key);
       if (merge) {
         td.colSpan = merge.right - merge.left + 1;
@@ -233,6 +243,15 @@ export function renderSheetIntoGrid(
         onInternalLink: opts.onInternalLink,
         theme: opts.theme,
       });
+      if (merge && (merge.right > merge.left || merge.bottom > merge.top)) {
+        // The merge's outline right/bottom borders live on its edge cells'
+        // styles, which the anchor-only render drops.
+        const edge = ws.getRow(merge.bottom).getCell(merge.right);
+        const rightCss = cellBorderSideCss(edge, "right", opts.theme);
+        if (rightCss) td.style.borderRight = rightCss;
+        const bottomCss = cellBorderSideCss(edge, "bottom", opts.theme);
+        if (bottomCss) td.style.borderBottom = bottomCss;
+      }
       cellMap.set(key, td);
     }
   }
