@@ -120,8 +120,12 @@
 }
 
 .docx-claude-pdf-slide {
-  width: 100%;
-  max-width: 1280px;
+  /* Pixel width (set by OfficeFileView from the pane width, capped at 1280px)
+     rather than a percentage: CSS `zoom` scales pixel lengths but percentage
+     chains stay pinned to the unzoomed pane, which made zoom appear dead on
+     the PDF path (only paddings scaled, content just shifted down). */
+  width: var(--docx-page-width, 100%);
+  max-width: none;
   display: flex;
   justify-content: center;
   /* Faint page frame so lazily-rendered pages occupy a visible page-shaped
@@ -131,8 +135,8 @@
 }
 
 .docx-claude-pdf-canvas {
+  /* 100% of the pixel-sized slide wrapper above, so zoom scales it. */
   width: 100%;
-  max-width: 1280px;
   height: auto;
   background: #ffffff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -148,7 +152,6 @@
   flex-direction: column;
   align-items: center;
   width: 100%;
-  max-width: 1280px;
   background: #ffffff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   border-radius: 4px;

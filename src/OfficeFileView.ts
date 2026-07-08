@@ -34,6 +34,7 @@ export abstract class OfficeFileView extends FileView {
   private engineBadgeEl: HTMLElement | null = null;
   private zoom = DEFAULT_ZOOM;
   private activePdfRender: PdfRenderHandle | null = null;
+  private pageWidthObserver: ResizeObserver | null = null;
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf);
@@ -70,6 +71,14 @@ export abstract class OfficeFileView extends FileView {
     this.renderEl = this.scrollEl.createDiv({ cls: "docx-claude-render" });
     this.applyZoom();
 
+    // PDF pages size themselves from --docx-page-width (a PIXEL length, so CSS
+    // zoom actually scales them; percentage widths stay pinned to the unzoomed
+    // pane). Measure the pane now and track resizes.
+    this.updatePageWidthVar();
+    this.pageWidthObserver?.disconnect();
+    this.pageWidthObserver = new ResizeObserver(() => this.updatePageWidthVar());
+    this.pageWidthObserver.observe(this.scrollEl);
+
     this.registerDomEvent(this.contentEl, "wheel", this.onWheel, {
       passive: false,
     });
@@ -79,6 +88,8 @@ export abstract class OfficeFileView extends FileView {
 
   async onUnloadFile(_file: TFile): Promise<void> {
     this.cancelActivePdfRender();
+    this.pageWidthObserver?.disconnect();
+    this.pageWidthObserver = null;
     this.contentEl.empty();
     this.renderEl = null;
     this.scrollEl = null;
@@ -244,6 +255,17 @@ export abstract class OfficeFileView extends FileView {
   private applyZoom(): void {
     if (!this.renderEl) return;
     (this.renderEl.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(this.zoom);
+  }
+
+  // Base page width in CSS px: fit the pane (up to the 1280px cap) at 100%
+  // zoom. The value is zoom-independent — scrollEl sits outside the zoomed
+  // subtree — so the visual page width becomes base * zoom.
+  private updatePageWidthVar(): void {
+    if (!this.scrollEl || !this.renderEl) return;
+    const w = this.scrollEl.clientWidth;
+    if (w > 0) {
+      this.renderEl.style.setProperty("--docx-page-width", `${Math.min(w, 1280)}px`);
+    }
   }
 
   private updateZoomIndicator(): void {
