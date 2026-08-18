@@ -6,6 +6,32 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  position: relative;
+}
+
+/* Floating bottom-right status pill (page position + word count). */
+.docx-claude-status {
+  display: none;
+  position: absolute;
+  right: 1rem;
+  bottom: 0.75rem;
+  z-index: 5;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-s);
+  opacity: 0.92;
+  pointer-events: none;
+  user-select: none;
+}
+
+.docx-claude-status.is-visible {
+  display: inline-block;
 }
 
 .docx-claude-toolbar {

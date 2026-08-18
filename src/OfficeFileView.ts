@@ -35,6 +35,15 @@ export abstract class OfficeFileView extends FileView {
   private zoom = DEFAULT_ZOOM;
   private activePdfRender: PdfRenderHandle | null = null;
   private pageWidthObserver: ResizeObserver | null = null;
+  // Floating bottom-right status pill: "Page 3 of 12 · 2,481 words".
+  private statusEl: HTMLElement | null = null;
+  private status: { totalPages: number | null; words: number | null; pageSelector: string | null } = {
+    totalPages: null,
+    words: null,
+    pageSelector: null,
+  };
+  private currentPage: number | null = null;
+  private statusScrollRaf: number | null = null;
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf);
@@ -83,6 +92,10 @@ export abstract class OfficeFileView extends FileView {
       passive: false,
     });
 
+    this.statusEl = this.contentEl.createDiv({ cls: "docx-claude-status" });
+    this.clearStatus();
+    this.registerDomEvent(this.scrollEl, "scroll", this.onStatusScroll, { passive: true });
+
     await this.renderFile(file);
   }
 
@@ -96,6 +109,82 @@ export abstract class OfficeFileView extends FileView {
     this.toolbarEl = null;
     this.zoomIndicatorEl = null;
     this.engineBadgeEl = null;
+    this.statusEl = null;
+    if (this.statusScrollRaf != null) {
+      cancelAnimationFrame(this.statusScrollRaf);
+      this.statusScrollRaf = null;
+    }
+  }
+
+  // Populate the floating status pill. `pageSelector` names the per-page
+  // elements inside renderEl used to track which page is in view; pass null
+  // to show only the totals. Any null field hides that segment; if nothing is
+  // known the pill hides entirely.
+  protected setStatus(next: {
+    totalPages?: number | null;
+    words?: number | null;
+    pageSelector?: string | null;
+  }): void {
+    this.status = { ...this.status, ...next };
+    this.currentPage = null;
+    this.updateCurrentPage();
+    this.renderStatus();
+  }
+
+  protected clearStatus(): void {
+    this.status = { totalPages: null, words: null, pageSelector: null };
+    this.currentPage = null;
+    this.renderStatus();
+  }
+
+  private renderStatus(): void {
+    if (!this.statusEl) return;
+    const parts: string[] = [];
+    const { totalPages, words } = this.status;
+    if (totalPages != null && totalPages > 0) {
+      parts.push(
+        this.currentPage != null && totalPages > 1
+          ? `Page ${this.currentPage} of ${totalPages}`
+          : `${totalPages} ${totalPages === 1 ? "page" : "pages"}`,
+      );
+    }
+    if (words != null) {
+      parts.push(`${words.toLocaleString()} ${words === 1 ? "word" : "words"}`);
+    }
+    this.statusEl.setText(parts.join(" · "));
+    this.statusEl.toggleClass("is-visible", parts.length > 0);
+  }
+
+  private onStatusScroll = (): void => {
+    if (this.statusScrollRaf != null || !this.status.pageSelector) return;
+    this.statusScrollRaf = requestAnimationFrame(() => {
+      this.statusScrollRaf = null;
+      this.updateCurrentPage();
+    });
+  };
+
+  // The current page is the one whose box covers the vertical midpoint of the
+  // viewport, else the nearest one to it. Bounding rects already account for
+  // CSS zoom on the render subtree, so no scaling math is needed.
+  private updateCurrentPage(): void {
+    const sel = this.status.pageSelector;
+    if (!sel || !this.scrollEl || !this.renderEl) return;
+    const pages = this.renderEl.querySelectorAll<HTMLElement>(sel);
+    if (pages.length === 0) return;
+    const view = this.scrollEl.getBoundingClientRect();
+    const mid = view.top + view.height / 2;
+    let best = 1;
+    let bestDist = Infinity;
+    for (let i = 0; i < pages.length; i++) {
+      const r = pages[i].getBoundingClientRect();
+      if (r.top <= mid && r.bottom >= mid) { best = i + 1; bestDist = 0; break; }
+      const d = Math.min(Math.abs(r.top - mid), Math.abs(r.bottom - mid));
+      if (d < bestDist) { bestDist = d; best = i + 1; }
+    }
+    if (best !== this.currentPage) {
+      this.currentPage = best;
+      this.renderStatus();
+    }
   }
 
   // Show which renderer produced the current view. Subclasses with a multi-tier
@@ -125,8 +214,8 @@ export abstract class OfficeFileView extends FileView {
     file: TFile,
     sofficeBin: string,
     ext: string,
-  ): Promise<void> {
-    if (!this.renderEl) return;
+  ): Promise<number> {
+    if (!this.renderEl) return 0;
     const loadingStage = this.renderEl.createDiv({ cls: "docx-claude-pdf-stage" });
     loadingStage
       .createDiv({ cls: "docx-claude-pdf-loading" })
@@ -142,7 +231,7 @@ export abstract class OfficeFileView extends FileView {
       pluginCacheDir(OfficeFileView.pluginId),
     );
 
-    if (this.file !== file || !this.renderEl) return;
+    if (this.file !== file || !this.renderEl) return 0;
     this.renderEl.empty();
     const stage = this.renderEl.createDiv({ cls: "docx-claude-pdf-stage" });
     this.cancelActivePdfRender();
@@ -168,6 +257,7 @@ export abstract class OfficeFileView extends FileView {
     // Leave the handle active: pages 2..N render lazily as they scroll into
     // view; teardown happens on the next cancelActivePdfRender (file
     // switch/unload), which disconnects the observer and destroys the doc.
+    return info.numPages;
   }
 
   private buildToolbar(toolbar: HTMLElement): void {

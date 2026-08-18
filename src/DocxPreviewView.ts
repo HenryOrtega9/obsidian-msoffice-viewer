@@ -5,6 +5,7 @@ import { findSoffice } from "./officeToPdf";
 import { buildDocxOptions } from "./docx/options";
 import { isRenderEmpty } from "./docx/emptyRender";
 import { warn } from "./docx/warn";
+import { countDocxWords } from "./docx/wordCount";
 
 export const DOCX_CLAUDE_VIEW_TYPE = "docx-claude-view";
 
@@ -50,6 +51,7 @@ export class DocxPreviewView extends OfficeFileView {
     // leak the PDF.js document + IntersectionObserver. Idempotent.
     this.cancelActivePdfRender();
     this.renderEl.empty();
+    this.clearStatus();
 
     let buf: ArrayBuffer;
     try {
@@ -62,6 +64,12 @@ export class DocxPreviewView extends OfficeFileView {
       return;
     }
     if (this.file !== file || !this.renderEl) return;
+
+    // Word count is renderer-independent; compute it off the raw bytes in
+    // parallel with the render and stamp it once both are known.
+    void countDocxWords(buf).then((words) => {
+      if (this.file === file && words != null) this.setStatus({ words });
+    });
 
     // LibreOffice → PDF is the high-fidelity default: it renders through the
     // real Office layout engine. docx-preview is the fallback when LibreOffice
@@ -100,6 +108,10 @@ export class DocxPreviewView extends OfficeFileView {
       }
       this.renderMode = "html";
       this.updateToggleLabel();
+      // docx-preview emits one <section class="docx"> per page (paginated on
+      // Word's lastRenderedPageBreak hints, so approximate for edited docs).
+      const pages = this.renderEl.querySelectorAll("section.docx").length;
+      this.setStatus({ totalPages: pages > 0 ? pages : null, pageSelector: "section.docx" });
       return true;
     } catch (e) {
       warn("render", e, { file: this.file?.path });
@@ -117,12 +129,13 @@ export class DocxPreviewView extends OfficeFileView {
     if (!soffice) return false;
     this.renderEl.empty();
     try {
-      await this.renderViaLibreOfficePdf(file, soffice, "docx");
+      const numPages = await this.renderViaLibreOfficePdf(file, soffice, "docx");
       // renderViaLibreOfficePdf returns silently when stale; don't stamp the
       // toggle/mode onto the file the view shows now.
       if (this.file !== file) return false;
       this.renderMode = "pdf";
       this.updateToggleLabel();
+      this.setStatus({ totalPages: numPages, pageSelector: ".docx-claude-pdf-slide" });
       return true;
     } catch (e) {
       warn("libreoffice", e, { file: file.path });
